@@ -1,26 +1,22 @@
 <!--
 Sync Impact Report
 ==================
-Versión: 1.0.0 → 1.1.0 (MINOR: guía ampliada y precisada; ningún principio eliminado ni renombrado)
+Versión: 1.1.0 → 1.2.0 (MINOR: obligaciones nuevas y guía ampliada; ningún principio eliminado,
+renombrado ni redefinido de forma incompatible)
 
 Principios modificados (títulos sin cambios):
-- I. STRIDE: alcance explícito (seguridad, autenticación, autorización, datos financieros,
-  infraestructura); cada mitigación exige criterio de aceptación + prueba verificable.
-- II. IAM: RBAC a nivel de función y de objeto; elección cookies de sesión vs. tokens Bearer
-  diferida a la especificación técnica; CSRF/CORS acordes al mecanismo elegido.
-- III. Criptografía: TLS según límites de confianza con excepciones documentadas; roles separados
-  de Argon2id, SHA-256, AES-256-GCM, RSA-OAEP (cifrado) y ECDSA (firma); prohibición explícita de
-  reutilizar nonces con la misma clave AES-GCM.
-- IV. API: CSRF/CORS remiten al Principio II.
-- V. DevSecOps: SAST (Semgrep/Bandit), SCA y análisis de contenedores diferenciados; Trivy como
-  complementario; gestión documentada de falsos positivos.
-- VI. Auditoría: lista de datos prohibidos en registros; se permiten identificadores internos o
-  seudonimizados y metadatos mínimos.
+- II. MFA obligatorio para Administradores, Auditores y todo rol privilegiado (antes: "roles
+  administrativos").
+- III. Nueva subsección "Secretos de autenticación": contraseñas (Argon2id), secretos TOTP (cifrado
+  autenticado AES-256-GCM, reversible), tokens de alta entropía (HMAC-SHA-256 con clave independiente
+  fuera de la base de datos) y códigos de recuperación (entropía mínima + Argon2id). Tabla de
+  primitivas y ejemplo de red interna actualizados.
 
-Secciones modificadas: Marco de Referencia y Stack (ECDSA, SHA-256), Flujo de Desarrollo,
-Gobernanza (registro de excepciones y falsos positivos).
+Secciones modificadas: Marco de Referencia y Stack (Mailpit como componente de laboratorio y reglas
+de aislamiento y sensibilidad de sus mensajes); Gobernanza (nuevas prohibiciones absolutas).
 Secciones añadidas/eliminadas: ninguna.
-Plantillas: no modificadas. TODOs diferidos: ninguno.
+Artefactos dependientes: spec 001 no modificada y compatible (FR-024, FR-028, FR-046, FR-047); el
+plan de la feature 001 MUST aplicar estas reglas. Plantillas: no modificadas. TODOs: ninguno.
 -->
 
 # Constitución de SecureFin Gateway
@@ -48,8 +44,10 @@ hace verificable.
 
 - Las contraseñas MUST almacenarse únicamente como hash Argon2id con parámetros documentados
   (ver Principio III).
-- Las cuentas MUST poder activar MFA mediante TOTP, y MFA MUST ser obligatorio para todos los
-  roles administrativos.
+- Las cuentas MUST poder activar MFA mediante TOTP. El MFA MUST ser obligatorio para los roles
+  Administrador y Auditor y para todo rol privilegiado (cualquier rol con permisos más allá de los
+  del cliente final), incluidos los que se creen en el futuro. Un usuario de estos roles sin MFA
+  verificado MUST NOT acceder a ninguna funcionalidad protegida distinta de su configuración.
 - La autorización MUST aplicarse en el servidor con RBAC en dos niveles: **función** (qué
   operaciones puede invocar cada rol; prevención de BFLA) y **objeto** (sobre qué registros
   concretos; prevención de BOLA/IDOR). El frontend nunca es una frontera de confianza.
@@ -81,8 +79,8 @@ la elección del mecanismo evita fijar controles CSRF/CORS que no correspondan.
   límite de confianza bajo ninguna excepción.
 - Se permiten, como **excepciones documentadas** según la sección de Gobernanza:
   - segmentos internos en redes locales aisladas que no cruzan un límite de confianza (p. ej. la
-    red interna de Docker entre Nginx, Django y PostgreSQL), siempre que no se expongan al host ni a
-    redes externas;
+    red interna de Docker entre Nginx, Django, PostgreSQL y el buzón de laboratorio), siempre que no
+    se expongan al host ni a redes externas;
   - demostraciones HTTP deliberadamente vulnerables (p. ej. captura de tráfico con Wireshark),
     que MUST ejecutarse aisladas de los componentes protegidos de SecureFin, usar solo datos
     ficticios e identificarse como vulnerables a propósito.
@@ -91,9 +89,9 @@ la elección del mecanismo evita fijar controles CSRF/CORS que no correspondan.
 
 | Primitiva | Uso permitido | Uso prohibido |
 |---|---|---|
-| **Argon2id** | Hash de contraseñas | Cifrado o integridad de datos |
-| **SHA-256** | Integridad y huellas de datos no secretos; HMAC-SHA-256 para autenticar mensajes | Hash de contraseñas por sí solo |
-| **AES-256-GCM** | Cifrado autenticado de datos sensibles en reposo (p. ej. secretos TOTP) | Modos sin autenticación (ECB, CBC sin MAC) |
+| **Argon2id** | Hash de contraseñas; verificadores de códigos de recuperación | Cifrado o integridad de datos; secretos que deban recuperarse (p. ej. TOTP) |
+| **SHA-256** | Integridad y huellas de datos no secretos; HMAC-SHA-256 para autenticar mensajes y como verificador de tokens de alta entropía | Hash de contraseñas o de códigos de recuperación; SHA-256 sin clave sobre secretos |
+| **AES-256-GCM** | Cifrado autenticado de datos sensibles en reposo, incluidos los secretos TOTP | Modos sin autenticación (ECB, CBC sin MAC) |
 | **RSA-OAEP** (demostrativo) | Cifrado asimétrico de datos pequeños o envoltura de claves (≥ 3072 bits, SHA-256) | Firmas digitales; relleno PKCS#1 v1.5 para cifrar |
 | **ECDSA** (demostrativo) | Firmas digitales: autenticidad e integridad (P-256 con SHA-256) | Cifrado de datos |
 
@@ -109,10 +107,40 @@ la elección del mecanismo evita fijar controles CSRF/CORS que no correspondan.
   control de versiones; ningún secreto real puede aparecer en el repositorio, en imágenes Docker ni
   en registros.
 
+**Secretos de autenticación: almacenamiento y verificación**
+
+Cada tipo de secreto tiene un tratamiento distinto según deba verificarse o recuperarse:
+
+| Secreto | Tratamiento obligatorio | Motivo |
+|---|---|---|
+| Contraseñas | Hash Argon2id con sal única (irreversible) | Solo hay que verificarlas, nunca recuperarlas |
+| Secretos TOTP | Cifrado autenticado AES-256-GCM (reversible) | El servidor necesita el secreto original para calcular cada código; un hash lo haría inutilizable |
+| Tokens de alta entropía (recuperación, activación y similares) | Verificador HMAC-SHA-256 con clave dedicada | Su entropía impide ataques de diccionario; la clave impide verificarlos fuera del servidor |
+| Códigos de recuperación de MFA | Verificador Argon2id con sal única | Su entropía es menor porque se teclean; necesitan una función lenta |
+
+- Los secretos TOTP MUST cifrarse con AES-256-GCM bajo una clave almacenada fuera de la base de
+  datos, con nonce único por operación y vinculando el texto cifrado a su usuario mediante datos
+  asociados, para que no pueda trasladarse a otra cuenta. MUST NOT almacenarse en claro ni con hash.
+- Los tokens de alta entropía MUST generarse con un CSPRNG con al menos 128 bits de entropía y
+  almacenarse solo como HMAC-SHA-256 calculado con una clave independiente, dedicada a este fin y
+  guardada fuera de la base de datos.
+- Los códigos de recuperación MUST generarse con un CSPRNG con al menos 64 bits de entropía cada
+  uno, mostrarse una sola vez y almacenarse solo como verificador Argon2id; su uso MUST estar
+  sujeto a la limitación de intentos del Principio II.
+- La verificación de tokens y códigos MUST hacerse con comparación en tiempo constante; cada uno es
+  de un solo uso y MUST invalidarse al usarse, al caducar o al emitirse su reemplazo.
+- Las claves de cifrado TOTP y de HMAC MUST ser distintas entre sí y de cualquier otra clave de la
+  aplicación. El plan técnico MUST documentar su ubicación y el efecto de su rotación o pérdida (p.
+  ej. tokens pendientes invalidados o MFA que debe reconfigurarse).
+- Los tokens, los códigos de recuperación y los secretos TOTP en claro MUST NOT aparecer en la base
+  de datos, en los registros ni en respuestas posteriores a su emisión.
+
 **Justificación**: la criptografía mal aplicada da una falsa sensación de seguridad. Asignar a cada
 primitiva un único propósito evita confusiones habituales (hashear con SHA-256, firmar con claves
-de cifrado, reutilizar nonces); delimitar TLS por límites de confianza lo hace verificable sin
-impedir las demostraciones del laboratorio.
+de cifrado, reutilizar nonces, hashear un secreto que debe recuperarse); delimitar TLS por límites
+de confianza lo hace verificable sin impedir las demostraciones del laboratorio. Guardar las claves
+fuera de la base de datos hace que una filtración de esta no baste para descifrar secretos TOTP ni
+verificar tokens.
 
 ### IV. Validación de Entradas y Defensa de la API
 
@@ -220,7 +248,22 @@ justifican durante `/speckit-plan`.
 - **DevSecOps y pruebas**: Git, GitHub, GitHub Actions, Semgrep y/o Bandit (SAST), herramienta SCA
   por definir, Trivy (contenedores y archivos), Pytest, Postman, cURL.
 - **Laboratorio**: Wireshark, Cisco Packet Tracer, Nmap, OWASP Juice Shop, Apache Benchmark,
-  OpenSSL.
+  OpenSSL, Mailpit (buzón local de captura de correo).
+
+**Buzón de correo de laboratorio (Mailpit).** Mailpit es el componente aprobado para capturar
+localmente, por SMTP, los correos que emite el sistema (recuperación, activación y notificaciones).
+Su uso queda sujeto a estas reglas:
+
+- MUST usarse solo como infraestructura de laboratorio y MUST NOT reenviar ni retransmitir correos
+  a servidores o destinatarios externos.
+- Su interfaz web y su puerto SMTP MUST ser accesibles solo desde el entorno local autorizado o la
+  red interna aislada, nunca desde redes externas. El tráfico SMTP interno sin TLS se registra como
+  excepción de red interna aislada (Principio III).
+- Los mensajes capturados MUST tratarse como información sensible, porque contienen tokens de un
+  solo uso: no se copian a los registros de la aplicación ni de auditoría, y toda evidencia
+  (capturas, informes) MUST ocultar los tokens o usar tokens ya caducados o consumidos.
+- Los mensajes MUST dirigirse solo a identidades ficticias, y el buzón MUST vaciarse según una
+  política de retención breve documentada en el plan técnico.
 
 **Uso ético de herramientas.** Las herramientas de análisis y ataque (Nmap, Wireshark, Apache
 Benchmark, etc.) MUST usarse únicamente contra el entorno de laboratorio propio, OWASP Juice Shop u
@@ -259,8 +302,10 @@ otros objetivos con autorización explícita. Las pruebas de carga MUST limitars
   Principio III y los hallazgos reales aceptados temporalmente del Principio V) MUST registrarse en
   la sección "Complexity Tracking" del `plan.md` correspondiente, indicando: justificación, riesgo
   residual, control compensatorio si existe, responsable y fecha de revisión o condición de cierre.
-  No se admiten excepciones a las prohibiciones absolutas (reutilizar nonces AES-GCM, credenciales
-  sin TLS a través de un límite de confianza, secretos en el repositorio, datos reales).
+  No se admiten excepciones a las prohibiciones absolutas: reutilizar nonces AES-GCM; credenciales
+  sin TLS a través de un límite de confianza; secretos en el repositorio; datos reales; contraseñas,
+  tokens o códigos de recuperación almacenados en claro; secretos TOTP sin cifrar o con hash; roles
+  privilegiados sin MFA; y buzón de laboratorio expuesto a redes externas o reenviando al exterior.
 - **Falsos positivos**: se gestionan según el Principio V y se revisan en el pull request que los
   introduce.
 - **Revisión de cumplimiento**: se verifica en cada "Constitution Check" de `/speckit-plan`, en cada
@@ -268,4 +313,4 @@ otros objetivos con autorización explícita. Las pruebas de carga MUST limitars
 - La guía operativa de desarrollo en tiempo de ejecución se mantiene en `CLAUDE.md` y MUST ser
   coherente con esta constitución.
 
-**Versión**: 1.1.0 | **Ratificada**: 2026-11-08 | **Última enmienda**: 2026-11-08
+**Versión**: 1.2.0 | **Ratificada**: 2026-11-08 | **Última enmienda**: 2026-11-08
