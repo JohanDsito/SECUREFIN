@@ -27,6 +27,7 @@ logger = logging.getLogger("securefin.outbox")
 class ComposedEmail:
     subject: str
     body: str
+    on_sent: Callable[[], None] | None = None
 
 
 Handler = Callable[[OutboxMessage], ComposedEmail]
@@ -72,6 +73,8 @@ def _deliver_one(message: OutboxMessage, stats: dict[str, int]) -> None:
             raise LookupError(f"Sin handler para {message.kind}")
         composed = handler(message)  # genera el secreto en memoria
         EmailMessage(composed.subject, composed.body, to=[message.user.email]).send(fail_silently=False)
+        if composed.on_sent is not None:
+            composed.on_sent()
     except Exception as exc:  # noqa: BLE001 - cualquier fallo de entrega se reintenta
         logger.warning("Fallo de entrega del outbox kind=%s attempts=%s error=%s", message.kind, message.attempts, type(exc).__name__)
         if message.attempts >= MAX_ATTEMPTS:

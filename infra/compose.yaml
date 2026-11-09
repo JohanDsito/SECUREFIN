@@ -44,6 +44,8 @@ services:
       - tls_cert
       - tls_key
       - mailpit_htpasswd
+    volumes:
+      - ../secrets/pki-public:/usr/share/nginx/html/.well-known/pki:ro
     networks: [edge_net, app_net, mail_net]
     depends_on:
       backend:
