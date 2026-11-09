@@ -1,0 +1,27 @@
+# Lista de bloqueo local de SecureFin (FR-004). Una contraseña por línea, comparación sin
+# distinguir mayúsculas tras normalización NFKC.
+# Fuente: selección manual de contraseñas largas (>= 15 caracteres) muy frecuentes en filtraciones
+# públicas y en listas de diccionario (p. ej. SecLists "Common-Credentials"), complementada con
+# variantes esperadas del laboratorio. Se amplía sin cambiar el código. Django añade además su lista
+# integrada de 20 000 contraseñas comunes (CommonPasswordValidator).
+123456789012345
+1234567890123456
+qwertyuiopasdfgh
+qwertyuiopasdfghjkl
+passwordpassword
+password1234567
+contraseña12345
+contraseña123456
+iloveyouiloveyou
+administrator123
+letmeinletmein1
+welcome12345678
+abcdefghijklmnop
+aaaaaaaaaaaaaaa
+000000000000000
+111111111111111
+correctohorsebatterystaple
+correct horse battery staple
+laboratorio2026!
+seguridad123456
+universidad2026
