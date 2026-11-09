@@ -10,8 +10,13 @@ cabeceras, y la ausencia de campos sensibles.
 
 - **Base**: `https://securefin.local/api/v1`, mismo origen que el frontend. Solo HTTPS.
 - **Formato**: JSON UTF-8. Los campos desconocidos se rechazan con `400` (FR-002).
-- **Autenticación**: cookie `__Host-sf_session` (`HttpOnly`, `Secure`, `SameSite=Strict`). Su valor
-  nunca se persiste en el servidor (solo su verificador, R2).
+- **Autenticación**: cookie `__Host-sf_session` (`HttpOnly`, `Secure`, `SameSite=Strict`, sin
+  `Expires`). Su valor nunca se persiste en el servidor (solo su verificador, R2).
+- **Emisión de la cookie de sesión**: `Set-Cookie: __Host-sf_session` **solo** aparece en las
+  respuestas que crean o rotan la sesión (login, elevación de `pre_auth` a `full`, confirmación de
+  alta y cambios de MFA, que rotan la clave) y en las que la eliminan (logout, revocación de la
+  propia sesión). Ninguna otra respuesta la reemite: la inactividad se renueva en el servidor
+  (TS-SC15).
 - **CSRF**: todo método no seguro exige `X-CSRFToken` (= cookie `__Host-sf_csrftoken`) y un
   `Origin` o `Referer` del mismo origen, también en los endpoints anónimos. Sin token → `403`.
 - **CORS**: no hay cabeceras CORS.
@@ -102,8 +107,14 @@ Administrador y Cliente → `403`. PUT, PATCH y DELETE → `405`.
 
 | Ruta | Fragmento | Contrato de comportamiento (R7) |
 |---|---|---|
+| `/forgot-password` | — (sin token) | Formulario que solicita la recuperación: email con `autocomplete="username"` → POST `/auth/password-reset/request` → siempre el mismo mensaje neutro (FR-045) |
 | `/activate` | `#token=<43 caracteres base64url>` | Lee el token en el primer render → `history.replaceState` sin fragmento → token solo en memoria → POST `/auth/activate` → descarta el token |
-| `/reset` | `#token=<43 caracteres base64url>` | Igual, con POST `/auth/password-reset/confirm` |
+| `/reset` | `#token=<43 caracteres base64url>` | Igual que `/activate`, con POST `/auth/password-reset/confirm` |
+
+Estas tres rutas del frontend (`/forgot-password`, `/reset` y `/activate`) se usan **exactamente**
+así en los correos (§8), en las páginas (T093, T115), en las pruebas E2E (T135, T136, T122) y en
+quickstart.md (corrección U4). El endpoint REST de solicitud sigue siendo
+`POST /auth/password-reset/request`.
 
 Cabeceras de Nginx para el SPA: `Cache-Control: no-store` en `index.html`; `Referrer-Policy:
 no-referrer`; CSP `default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:;
@@ -126,6 +137,6 @@ style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; fo
 | `kind` | Contenido | Caducidad | Prohibido |
 |---|---|---|---|
 | `account_activation` | Enlace `https://securefin.local/activate#token=…` | 24 h | Contraseñas |
-| `password_reset` | Enlace `https://securefin.local/reset#token=…` | 30 min (⚠️ 15 min hasta que se enmiende FR-046) | Indicar si hay MFA |
+| `password_reset` | Enlace `https://securefin.local/reset#token=…` | 15 min (FR-046) | Indicar si hay MFA |
 | `mfa_reset_challenge` | Código de 8 caracteres e instrucción de leerlo **solo** al Administrador por el canal registrado | 10 min | Enlaces |
 | `mfa_reset_notice` | Fecha, aviso y qué hacer si no lo solicitó | — | Datos del Administrador más allá del rol |

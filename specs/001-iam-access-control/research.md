@@ -6,6 +6,11 @@ Cada decisión sigue el formato exigido: alternativas, decisión, justificación
 y verificación. Los identificadores `T-xx` remiten al análisis STRIDE de `plan.md`; los `TS-xx`, a
 la estrategia de pruebas.
 
+**Revisión 3** (corrección del análisis de coherencia): clave propia `THROTTLE_HMAC_KEYS` (R8, R12);
+renovación de la inactividad en el servidor sin reemitir la cookie (R2, R13); credenciales de
+PostgreSQL por servicio (R8, R14); CI por trabajos con stack de Compose y secretos efímeros (R16);
+Playwright obligatorio (R17); pruebas de tiempos del login y de límites por IP (R9, R12).
+
 **Revisión 2**: motor de sesión documentado por completo (R2); metodología de calibración de
 Argon2id (R4); códigos de recuperación de 128 bits o más (R6); manejo del fragmento en React y
 caducidades (R7); claves de sesión independientes (R8); patrón *outbox* (R9); segmentación de redes
@@ -42,7 +47,7 @@ inmutabilidad (R14); versiones y bloqueo (R17).
 |---|---|---|---|
 | Robo por XSS | La cookie no es legible por JS | Exfiltrable | Exfiltrable mientras dura el token de acceso |
 | Revocación inmediata (FR-010, FR-012) | Borrar la fila | Lista de revocación | Lista de revocación del refresh |
-| Inactividad (FR-011) | Nativa | Hay que construirla | Hay que construirla |
+| Inactividad (FR-011) | En el servidor (`last_activity_at`), sin reemitir la cookie | Hay que construirla | Hay que construirla |
 | CSRF | Necesario (R3) | No aplica | Necesario en el refresh |
 | Complejidad Django + React | Baja | Media | Alta |
 | Dependencias | Ninguna | simplejwt | simplejwt |
@@ -65,14 +70,33 @@ y se sustituye por un modelo propio con un motor que solo conoce verificadores.
 | `key_verifier` | `varchar(72)`, PK | `"<versión>$<hex64>"`; versión de 1 a 6 caracteres (`v1`…`v9999`) + `$` + 64 hex = 71 como máximo |
 | `key_version` | `varchar(6)`, índice | Redundante con el prefijo; restricción `CHECK (key_verifier LIKE key_version \|\| '$%')` |
 | `session_data` | text | Codificado y firmado por Django |
-| `expire_date` | timestamptz, índice | Inactividad: ahora + 15 min, renovado en cada petición |
+| `expire_date` | timestamptz, índice | **Caducidad absoluta**, nunca extendida, siempre calculada desde el `created_at` **inicial** (corrección I3; FR-011 "8 horas desde su creación"): `created_at + 5/10 min` en `pre_auth` y `created_at + 8 h` en `full` (y en cualquier otra fila). Al pasar de `pre_auth` a `full` se recalcula desde el **mismo** `created_at` |
 | `public_id` | uuid, único | Identificador expuesto en la API (nunca el verificador) |
-| `user_id` | FK nulo, índice | Desnormalizado desde los datos de sesión al guardar |
-| `auth_level` | `varchar(10)` | `anonymous` \| `pre_auth` \| `full` |
-| `created_at` | timestamptz | Solo se fija al insertar |
-| `authenticated_at` | timestamptz nulo | Base del límite absoluto de 8 h; se conserva al rotar la clave |
-| `last_activity_at` | timestamptz | |
+| `user_id` | FK, índice | **Propietario de la sesión, presente en `pre_auth` y en `full`** (corrección U3). Se desnormaliza al guardar desde `_sf_pending_user_id` (en `pre_auth`) o desde `_auth_user_id` de Django (en `full`). Solo sirve para correlacionar: revocación, expiración y `session_expired`. **No** autentica ni otorga permisos |
+| `auth_level` | `varchar(10)` | `pre_auth` \| `full`. **No se persisten sesiones anónimas** (corrección I1) |
+| `created_at` | timestamptz | **Creación inicial de la sesión** (normalmente en el paso `pre_auth`, o en el login directo de un Cliente sin MFA). **Base del límite absoluto de 8 h.** Se fija en la primera inserción y **se copia en cada rotación** (`cycle_key`): de `pre_auth` a `full`, login y cambios de MFA. Ninguna rotación lo reinicia |
+| `authenticated_at` | timestamptz nulo | Momento en que la sesión pasó a `full`. Es informativo (se devuelve en `/auth/session`) y **no** interviene en la caducidad |
+| `last_activity_at` | timestamptz | **Base de la inactividad de 15 min.** Se renueva en el servidor con un `UPDATE` directo de metadatos (granularidad de 60 s), sin tocar `session_data` y **sin reemitir la cookie** (C2) |
 | `ip_address` / `user_agent` | inet / `varchar(200)` | Para que el usuario reconozca sus sesiones |
+
+**Nacimiento de la sesión y CSRF (corrección I1)**:
+
+- `CSRF_USE_SESSIONS = False`. La cookie `__Host-sf_csrftoken` es independiente del almacén de
+  sesiones: pedir `GET /auth/csrf` **no crea** ninguna fila `UserSession` ni emite cookie de sesión.
+- Las rutas anónimas que cambian estado siguen protegidas por CSRF (token de la cookie, cabecera
+  `X-CSRFToken` y validación de origen), sin necesitar sesión.
+- La **primera sesión de servidor** nace solo después de validar correctamente la contraseña:
+  `pre_auth` si el usuario tiene MFA activo o su rol lo exige; `full` directamente si no hace falta
+  MFA.
+- El límite absoluto de 8 h empieza en el `created_at` de esa primera sesión y se hereda en todas
+  las rotaciones.
+
+**Usuario pendiente en `pre_auth` (corrección U3)**: `_sf_pending_user_id` es una clave interna de
+los datos de sesión con el id del usuario cuya contraseña se validó pero que no ha completado el
+MFA. No llama a `login()`, así que `request.user` sigue siendo `AnonymousUser`; no permite acceder a
+endpoints protegidos (`IsFullyAuthenticated` exige `full`) ni otorga permisos. Solo correlaciona la
+sesión con su propietario para la limitación de intentos, la expiración (`pre_auth_timeout`) y la
+revocación. Al pasar a `full` se elimina y se sustituye por `_auth_user_id`.
 
 **No existe ningún campo llamado `session_key`.** Si cualquier método heredado de Django no
 sobrescrito intentara filtrar por `session_key=`, el ORM lanzaría `FieldError`, así que el diseño
@@ -85,7 +109,12 @@ modelo por defecto.
 - **Base**: subclase de `django.contrib.sessions.backends.db.SessionStore` con `get_model_class()`
   → `UserSession`.
 - **Claves**: `SESSION_HMAC_KEYS` (mapa versionado: una versión activa más las anteriores
-  aceptadas), **independiente** de `DJANGO_SECRET_KEY` y de las claves de tokens y TOTP.
+  aceptadas), **independiente** de `DJANGO_SECRET_KEY`, `TOKEN_HMAC_KEYS`, `THROTTLE_HMAC_KEYS` y
+  `TOTP_ENCRYPTION_KEYS`.
+- **Ajustes** (decisión C2, alternativa B): `SESSION_SAVE_EVERY_REQUEST = False`,
+  `SESSION_EXPIRE_AT_BROWSER_CLOSE = True` (cookie de sesión del navegador, sin `Expires`) y
+  `SESSION_COOKIE_AGE = 28800`, usado solo como tope absoluto. La inactividad se controla en el
+  servidor con `last_activity_at`.
 - **Verificador**:
   `verifier(v, k) = v + "$" + hex(HMAC-SHA-256(SESSION_HMAC_KEYS[v], "securefin:session:" + k))`.
 
@@ -93,19 +122,21 @@ modelo por defecto.
 |---|---|
 | Generación (`_get_new_session_key`) | `secrets.token_urlsafe(32)` (256 bits, CSPRNG); se reintenta si `exists()` |
 | Creación (`create`) | Bucle: clave nueva → `save(must_create=True)`; una `IntegrityError` provoca reintento. Inserta con el verificador de la **versión activa** |
-| Guardado (`save`, `create_model_instance`) | Construye la fila con `key_verifier`, datos, `expire_date` y los metadatos (`user_id`, `auth_level`, `authenticated_at` leídos de los datos de sesión). Si `must_create=False` usa `force_update` **sin** `update_or_create`: si la fila fue revocada entretanto, Django lanza `UpdateError` y la sesión **no se resucita** (el middleware responde `SessionInterrupted`) |
-| Carga (`load`, `_get_session_from_db`) | Calcula el verificador para cada versión aceptada (activa primero) y busca `key_verifier = X AND expire_date > now`. Rechaza y borra si `authenticated_at + 8 h < now`, o si es `pre_auth` y supera 5/10 min. Si no la encuentra, fija `self._session_key = None` y devuelve `{}`: **nunca adopta un identificador que no haya emitido** (anti-fijación) |
+| Guardado (`save`, `create_model_instance`) | **Solo ocurre cuando los datos de sesión cambian** (creación, login, elevación de nivel, cambios de MFA), porque `SESSION_SAVE_EVERY_REQUEST = False`. Construye la fila con `key_verifier`, datos, `expire_date` **absoluta** (calculada siempre desde el `created_at` inicial, nunca desde "ahora") y los metadatos (`user_id`, `auth_level`, `authenticated_at`). Si `must_create=False` usa `force_update` **sin** `update_or_create`: si la fila fue revocada entretanto, Django lanza `UpdateError` y la sesión **no se resucita** (el middleware responde `SessionInterrupted`) |
+| Carga (`load`, `_get_session_from_db`) | Calcula el verificador para cada versión aceptada (activa primero) y busca `key_verifier = X` **sin** filtrar por fecha, para poder distinguir "caducada" de "inexistente". Si la fila existe pero `expire_date ≤ now` o `now − last_activity_at > 15 min`: la borra y, solo si tenía `user_id` (`pre_auth` o `full`), registra `session_expired` con el motivo `idle`, `absolute` o `pre_auth_timeout`. Si no la encuentra (cookie aleatoria, mal formada, de versión retirada o ya purgada), **no registra nada**. En ambos casos fija `self._session_key = None` y devuelve `{}`: **nunca adopta un identificador que no haya emitido** (anti-fijación) |
+| Actividad (`touch`, desde `SessionLifetimeMiddleware`) | Si la sesión es válida y `now − last_activity_at ≥ 60 s`: `UserSession.objects.filter(key_verifier=X).update(last_activity_at=now, ip_address=…, user_agent=…)`. **No** marca la sesión como modificada, **no** cambia `session_data` ni `expire_date` y **no** provoca `Set-Cookie`. La granularidad de 60 s solo puede adelantar la caducidad, nunca superar los 15 min |
+| Emisión de la cookie | `SessionMiddleware` solo envía `Set-Cookie: __Host-sf_session` cuando la sesión se crea o se modifica (creación con datos, `cycle_key` en login, elevación de `pre_auth` a `full` y cambios de MFA) y la borra en el logout o la revocación. Ninguna otra respuesta reemite el identificador |
 | Existencia (`exists`) | Verificadores de todas las versiones aceptadas |
 | Borrado (`delete`) | `DELETE` por verificadores; sin argumento, usa la clave actual |
-| Rotación (`cycle_key`) | Comportamiento de Django (crear una nueva con los mismos datos y borrar la anterior), conservando `authenticated_at` salvo en el login |
-| Limpieza (`clear_expired`) | Borra si `expire_date < now` o si `authenticated_at < now − 8 h` |
+| Rotación (`cycle_key`) | Comportamiento de Django (crear una nueva con los mismos datos y borrar la anterior). La fila nueva **hereda el `created_at` inicial** de la anterior, también en la elevación de `pre_auth` a `full`, en el login y tras los cambios de MFA, así que el límite absoluto no se reinicia nunca. `authenticated_at` se fija al pasar a `full` |
+| Limpieza (`clear_expired`) | Borra si `expire_date < now` o si `created_at < now − 8 h` |
 | API asíncrona de Django 5.x (`aload`, `asave`, `acreate`, `aexists`, `adelete`, `acycle_key`, `aclear_expired`) | Se sobrescriben y lanzan `NotImplementedError`: el proyecto es WSGI síncrono, y así no hay rutas heredadas sin revisar |
 
 ### R2.5 Integración con Django
 
 | Pieza de Django | Interacción |
 |---|---|
-| `SessionMiddleware` | Carga y guarda mediante el motor; escribe la cookie con la clave en claro **solo** hacia el navegador |
+| `SessionMiddleware` | Carga mediante el motor; guarda y escribe la cookie **solo** cuando la sesión se modificó (`SESSION_SAVE_EVERY_REQUEST = False`). La clave en claro viaja únicamente hacia el navegador, en la creación o la rotación. Así se cumple que los tokens no aparezcan en respuestas posteriores a su emisión (Principio III) |
 | `django.contrib.auth.login()` | Llama a `cycle_key()` (anti-fijación) y guarda `_auth_user_id`, `_auth_user_backend` y `_auth_user_hash` en los datos |
 | `logout()` / `flush()` | Borra la fila y genera una clave nueva vacía |
 | `update_session_auth_hash()` | No se usa: los cambios sensibles revocan con `revoke_all` (R13) |
@@ -148,7 +179,7 @@ sería un motor completo propio (sin heredar de `db.SessionStore`) que implement
 
 - **Riesgos**: errores en el motor; carreras entre revocación y peticiones en curso; escritura en
   base de datos por cada petición.
-- **Verificación**: suite de conformidad TS-SC01–SC14 (Test Strategy de `plan.md`).
+- **Verificación**: suite de conformidad TS-SC01–SC20 (Test Strategy de `plan.md`).
 
 ## R3. CSRF y CORS acordes al mecanismo
 
@@ -273,7 +304,7 @@ sería un motor completo propio (sin heredar de `db.SessionStore`) que implement
   | Elemento | Caducidad | Observación |
   |---|---|---|
   | Activación de cuenta | 24 h | Coincide con FR-021 |
-  | Recuperación de contraseña | **30 min** | ⚠️ La spec vigente fija **15 min** (FR-046, US7-2). Mientras no se enmiende, rige el valor de la spec. El parámetro `PASSWORD_RESET_TTL` es configurable |
+  | Recuperación de contraseña | **15 min** | Coincide con FR-046 y el escenario 2 de US7 (decisión confirmada por el titular el 2026-11-09). Cuenta desde la emisión del token, que ocurre en la entrega del outbox (R9) |
   | Código de verificación del reinicio de MFA | 10 min | No es un token HMAC: es un código de 8 caracteres con verificador Argon2id (R11) |
 
 - **Manejo en React** de los enlaces `https://securefin.local/reset#token=…` y `/activate#token=…`:
@@ -303,19 +334,30 @@ sería un motor completo propio (sin heredar de `db.SessionStore`) que implement
 |---|---|---|
 | `DJANGO_SECRET_KEY` | Firma de Django (datos de sesión, CSRF) | — |
 | `SESSION_HMAC_KEYS` | Verificadores de sesión (R2) | Sí |
-| `TOKEN_HMAC_KEYS` | Verificadores de tokens (R7) y resúmenes de limitación (`"throttle:"`) | Sí |
+| `TOKEN_HMAC_KEYS` | **Solo** verificadores de tokens de un solo uso (R7) | Sí |
+| `THROTTLE_HMAC_KEYS` | **Solo** resúmenes seudonimizados de las claves de limitación por cuenta (R12) | Sí |
 | `TOTP_ENCRYPTION_KEYS` | AES-256-GCM de los secretos TOTP (R5) | Sí |
-| Contraseñas de los roles de PostgreSQL | `owner` (solo migraciones) y `app` (ejecución) | — |
+| Contraseñas de los roles de PostgreSQL | `db_owner_password` (solo el servicio `migrate`) y `db_app_password` (backend y mailer) | — |
 
-- `core.keys` valida al arrancar: presencia, al menos 32 bytes y **todas distintas entre sí**. Si
-  algo falla, no arranca.
-- El contenedor de ejecución **no monta** la credencial del rol `owner` (R14).
+- **Una clave por propósito criptográfico** (corrección C1): ninguna clave HMAC se comparte entre
+  sesiones, tokens y limitación. Así se cumple la "clave independiente, dedicada a este fin" del
+  Principio III.
+- `core.keys` valida al arrancar: presencia, al menos 32 bytes por versión y **todas las claves
+  distintas entre sí**, incluidas todas las versiones de los cinco conjuntos. Si algo falla, no
+  arranca.
+- **Credenciales de PostgreSQL por servicio** (corrección U1): la configuración lee `DB_USER` y
+  `DB_PASSWORD_FILE` del entorno de cada servicio. `backend` y `mailer` reciben `securefin_app` y
+  `/run/secrets/db_app_password`; solo `migrate` recibe `securefin_owner` y
+  `/run/secrets/db_owner_password`. Una comprobación al arrancar (`SECUREFIN_PROCESS_ROLE` igual a
+  `runtime` o `migrate`) impide que un proceso de ejecución arranque conectado como
+  `securefin_owner`.
 - **Rotación y pérdida**:
 
   | Clave | Rotación planificada | Pérdida o compromiso |
   |---|---|---|
   | Sesión | R2.6 | Se cierran todas las sesiones |
-  | Tokens | `v2` activa; `v1` aceptada hasta 24 h | Se invalidan los tokens pendientes y se reinician los contadores de limitación |
+  | Tokens | `v2` activa; `v1` aceptada hasta 24 h | Se invalidan los tokens pendientes |
+  | Limitación | `v2` activa para los resúmenes nuevos; `v1` sigue aceptada para consultar retrasos vigentes y sus filas se purgan según la regla de R12 (sin retraso vigente y 30 min sin fallos); después se retira `v1` | Se reinician los contadores de retraso por cuenta (ventana de reintento de, como máximo, 5 intentos). Se documenta como riesgo aceptado |
   | TOTP | `iam_rotate_totp_key --to v2` | Todos vuelven a dar de alta su MFA (*break-glass* para el último Administrador) |
 
 - **Verificación**: TS-U07; escaneo de secretos en CI.
@@ -359,7 +401,10 @@ sería un motor completo propio (sin heredar de `db.SessionStore`) que implement
     revoca todas las sesiones y conserva el MFA.
   - **Activación**: el Administrador crea la cuenta en `pending_activation` → outbox → token de 24 h
     → `POST /auth/activate`.
-- **Verificación**: TS-S09 (Δ medio < 100 ms en 200 peticiones, con Mailpit activo **y detenido**),
+- **Verificación**: TS-S27 (**login**: usuario existente con contraseña errónea frente a usuario
+  inexistente; mismo estado, cuerpo y conjunto de cabeceras, y Δ medio < 100 ms en 200 peticiones;
+  corrección G1), TS-S09 (recuperación: Δ medio < 100 ms en 200 peticiones, con Mailpit activo **y
+  detenido**),
   TS-I12 (Mailpit caído: `202`, reintentos y evento final), TS-I18 (el outbox no contiene
   secretos), TS-A07.
 
@@ -381,15 +426,32 @@ sería un motor completo propio (sin heredar de `db.SessionStore`) que implement
 - **Mailpit**:
   - Imagen con versión y *digest* fijados.
   - **Sin puertos publicados**: ni SMTP 1025 ni interfaz 8025.
-  - Su interfaz solo se consulta a través de un `server` de Nginx publicado **solo** en
-    `127.0.0.1:8025`, con doble autenticación: básica en Nginx y archivo de autenticación de
-    Mailpit.
+  - Su interfaz y su API REST solo se consultan a través de un `server` de Nginx publicado **solo**
+    en `127.0.0.1:8025`, **con TLS** (`https://127.0.0.1:8025`, certificado de la CA de laboratorio
+    con SAN `IP:127.0.0.1`). La revisión 4 lo dejaba en HTTP, pero las credenciales Basic y los
+    tokens de los mensajes cruzarían así el límite de confianza host ↔ contenedores (Principio III).
+  - **Doble autenticación con una sola credencial**: una petición solo lleva una cabecera
+    `Authorization: Basic`, que Nginx valida contra su `htpasswd` y reenvía a Mailpit, que la vuelve
+    a validar contra su `MP_UI_AUTH_FILE`. Ambos archivos contienen **la misma** credencial. Así es
+    defensa en profundidad ante un fallo de configuración de una de las capas, no dos credenciales
+    distintas. La autenticación de Mailpit protege tanto la interfaz como la API.
   - Sin `MP_SMTP_RELAY_*`, así que no hay relay ni "liberación" de mensajes.
   - Retención de 200 mensajes y 24 h.
   - Bloqueo de recursos remotos en la vista HTML.
 - **Django (proceso `mailer`)**: `EmailBackend` SMTP hacia `mailpit:1025` sin TLS (**excepción
   E3** en Complexity Tracking). El backend `locmem` se usa en las pruebas.
 - **Evidencias**: con los tokens ocultos o usando tokens ya consumidos o caducados.
+- **Fixtures automatizados de Mailpit (corrección U2)**:
+  - Los *fixtures* E2E y `stack` obtienen los mensajes **solo** con la API REST autenticada de
+    Mailpit, a través de Nginx en `https://127.0.0.1:8025`: `GET /api/v1/messages` para localizar el
+    mensaje (por destinatario y asunto) y `GET /api/v1/message/{ID}` o `/api/v1/message/{ID}/raw`
+    para leer su contenido.
+  - Autenticación Basic con `MAILPIT_API_USER` y `MAILPIT_API_PASSWORD`, variables de entorno
+    efímeras generadas en el trabajo de CI. Se confía en la CA de laboratorio efímera.
+  - El token o código se extrae **solo en memoria** y nunca se imprime, se escribe en archivos ni se
+    adjunta a informes.
+  - Al terminar, el *fixture* borra los mensajes de prueba (`DELETE /api/v1/messages` con sus IDs).
+  - Mailpit sigue sin ser accesible desde redes externas.
 - **Verificación**: TS-S10 (`docker compose config` y Nmap externo), TS-S11 (doble autenticación),
   TS-I13 (entrega solo en el buzón), TS-S25 (inventario de redes: Mailpit solo en `mail_net`;
   backend y Mailpit solo comparten `mail_net`; ninguna red de Mailpit sin `internal: true`).
@@ -461,8 +523,15 @@ exigen tres elementos verificables por el sistema, más la autorización reforza
 
 - **Alternativas**: `django-axes` (bloqueo rígido); solo Nginx; Redis; PostgreSQL.
 - **Decisión**:
-  - **Por cuenta**: modelo `AuthThrottle` con la clave `HMAC(TOKEN_HMAC_KEYS, "throttle:acct:" +
-    email normalizado)`. Desde el 5.º fallo, retrasos de 30, 60, 120, 240 y 480 s, y después 900 s
+  - **Por cuenta**: modelo `AuthThrottle` con la clave `HMAC(THROTTLE_HMAC_KEYS[v], "throttle:acct:"
+    + email normalizado)` y `key_version`. La clave es exclusiva de este fin (C1). Durante una rotación, `check()` consulta los resúmenes de
+    **todas las versiones aceptadas** y aplica el retraso más restrictivo. Los fallos nuevos se
+    registran en la versión activa, heredando el contador de la fila antigua, que se borra al
+    migrar, para que una rotación no elimine un bloqueo vigente.
+  - **Purga controlada** (`iam_purge_expired`; corrección G1): borra una fila de `AuthThrottle` solo
+    si `blocked_until` es nulo o ya pasó **y** además (a) `last_failure_at ≤ now − 30 min` o (b) su
+    `key_version` ya no está entre las versiones aceptadas. **Nunca** borra una fila con un retraso
+    vigente ni una con fallos en los últimos 30 minutos de una versión aceptada. Desde el 5.º fallo, retrasos de 30, 60, 120, 240 y 480 s, y después 900 s
     como tope. Durante el retraso, rechazo sin evaluar credenciales con el 401 genérico. Se reinicia
     tras un éxito o tras 30 min sin fallos. Actualizaciones con `select_for_update`.
   - **Por IP**: throttles de DRF por ámbito con `DatabaseCache`:
@@ -480,14 +549,25 @@ exigen tres elementos verificables por el sistema, más la autorización reforza
     (`NUM_PROXIES=1`).
   - **Anomalías**: `throttle_account_delay`, `throttle_ip_limited` y `credential_stuffing_suspected`
     (10 o más identificadores distintos en 15 min desde una IP).
-- **Verificación**: TS-I15, TS-S13, TS-S14, TS-I16.
+- **Verificación**: TS-I15, TS-S13, TS-S14, TS-I16 y **TS-S28** (prueba parametrizada por ámbito:
+  umbral, 429, `Retry-After` y evento `throttle_ip_limited`; corrección G2).
 
 ## R13. Expiración y revocación de sesiones
 
 - **Decisión**:
-  - **Inactividad**: `SESSION_COOKIE_AGE = 900` con `SESSION_SAVE_EVERY_REQUEST = True`.
-  - **Absoluta**: comprobada **en el propio motor** (`load` con `authenticated_at + 8 h`), además del
-    `SessionLifetimeMiddleware` como segunda capa.
+  - **Inactividad (15 min)**: controlada en el servidor con `last_activity_at`. El
+    `SessionLifetimeMiddleware` la renueva con un `UPDATE` directo de metadatos (granularidad de
+    60 s), **sin** modificar `session_data` ni reemitir la cookie. `SESSION_SAVE_EVERY_REQUEST =
+    False` (decisión C2, alternativa B; se descartó la alternativa de enmendar la constitución).
+  - **Absoluta (8 h desde la creación, FR-011)**: `expire_date = created_at + 8 h`, con el `created_at`
+    inicial de la sesión (`pre_auth` o login directo) **heredado en cada rotación**. Nunca se
+    extiende ni se reinicia, y se comprueba **en
+    el propio motor** al cargar, además del `SessionLifetimeMiddleware` como segunda capa.
+  - **Cookie**: `__Host-sf_session` sin `Expires` (`SESSION_EXPIRE_AT_BROWSER_CLOSE = True`). Solo
+    se emite al crear o rotar la sesión y se elimina en el logout.
+  - **Evento `session_expired`**: solo cuando una sesión con `user_id` que el servidor emitió
+    válidamente se encuentra caducada al reutilizarse. Nunca por cookies aleatorias, mal formadas,
+    inexistentes o ya purgadas (corrección I1).
   - **`pre_auth`**: sin `login()`; caduca a los 5 minutos (10 en un alta obligatoria). Solo accede a
     `/auth/login/mfa`, `/auth/login/enroll/*`, `/auth/login/mfa-reset-request` y `/auth/logout`.
   - **Revocación** (`sessions.revoke_all(user, except_current)`): borra las filas por `user_id`; el
@@ -495,7 +575,12 @@ exigen tres elementos verificables por el sistema, más la autorización reforza
     FR-012, con la rotación de la clave de la sesión conservada.
   - Una petición en curso que intente guardar tras la revocación recibe `UpdateError` y la sesión no
     se resucita.
-- **Verificación**: TS-I06, TS-I07, TS-I08, TS-S15 y la suite TS-SC.
+- **Verificación**: TS-I06, TS-I07, TS-I08, TS-S15 y la suite TS-SC, incluidas **SC15** (ausencia
+  de `Set-Cookie` de sesión en respuestas que no crean ni rotan la sesión), **SC16**
+  (`last_activity_at` se actualiza sin que cambie `session_data`) y **SC17** (reglas de emisión de
+  `session_expired`) **SC18** (el límite absoluto se mide desde el `created_at` inicial y ninguna
+  rotación lo reinicia), **SC19** (pedir el token CSRF o fallar el login no crea sesiones) y **SC20**
+  (`_sf_pending_user_id`: correlación sin autenticación y revocación de `pre_auth` y `full`).
 
 ## R14. Auditoría, roles de PostgreSQL y separación de funciones
 
@@ -511,7 +596,12 @@ exigen tres elementos verificables por el sistema, más la autorización reforza
   - Privilegios por defecto (`ALTER DEFAULT PRIVILEGES FOR ROLE securefin_owner`) para las tablas
     IAM, más una migración específica que revoca UPDATE, DELETE y TRUNCATE sobre la tabla de
     auditoría.
-  - La credencial de `securefin_owner` solo se monta en el servicio de un solo uso `migrate`.
+  - La credencial de `securefin_owner` solo se monta en el servicio de un solo uso `migrate`. El
+    backend y el mailer usan exclusivamente `securefin_app` y se niegan a arrancar si se conectan
+    como `securefin_owner` (R8, corrección U1).
+- **Retención**: los eventos se conservan durante la vigencia del laboratorio académico. Solo se
+  eliminan al desmantelar el entorno, con un procedimiento ejecutado con `securefin_owner` fuera de
+  la aplicación y documentado en `docs/security/privacy.md` (corrección C4).
 - **Defensas adicionales**:
   1. el modelo bloquea `save()` sobre registros existentes y `delete()`;
   2. triggers `BEFORE UPDATE OR DELETE` (por fila) y `BEFORE TRUNCATE` (por sentencia) que lanzan
@@ -552,9 +642,35 @@ exigen tres elementos verificables por el sistema, más la autorización reforza
   inyectable con `unittest.mock`; fixtures propias con identidades ficticias.
   - **Capas**: unitarias, integración, seguridad, **conformidad del motor de sesión (TS-SC)**,
     contrato, aceptación y rendimiento.
-  - **CI**: pytest con cobertura → Semgrep y Bandit → pip-audit y npm audit → construcción → Trivy
-    `image` y `fs --scanners misconfig,secret`. Falla con severidad alta o crítica, y las
-    supresiones se justifican en el PR.
+  - **Marcadores**: `unit` (sin base de datos), `integration`, `session_conformance`, `security`,
+    `contract` y `acceptance` (con PostgreSQL), `stack` (necesita el stack completo de Compose) y
+    `e2e` (Playwright contra el stack).
+  - **CI en trabajos separados** (correcciones U2 y U4):
+    1. `static`: Semgrep, Bandit, pip-audit, npm audit y Trivy `fs`.
+    2. `unit`: `pytest -m unit`.
+    3. `integration`: servicio PostgreSQL inicializado con los dos roles, y `pytest -m
+       "integration or session_conformance or security or contract or acceptance" -m "not stack"`.
+    4. `stack`: genera secretos **efímeros** con `openssl rand -base64 32` en el runner (nunca
+       secretos reales ni versionados) → `docker compose up -d --wait` (healthchecks de db, backend,
+       mailer, mailpit y nginx) → `docker compose run --rm migrate` → `pytest -m stack` y
+       `npx playwright test` → Trivy `image` → `docker compose down -v`.
+  - **Protección de tokens en E2E (corrección U1)**:
+    - `playwright.config.js` con `trace: "off"`, `video: "off"`, `screenshot: "off"` y reporter
+      `list` (sin informe HTML).
+    - `outputDir` temporal que se borra al terminar.
+    - Ningún `console.log`, mensaje de aserción ni log con URLs completas, tokens o cuerpos de
+      correo.
+    - La CI **no sube** `test-results/` ni `playwright-report/` como artefactos.
+    - Los tokens se consumen en la propia prueba, los mensajes se borran de Mailpit al final y el
+      entorno se destruye con `docker compose down -v`.
+    - Como evidencia se usa un resumen textual sanitizado (nombre de la prueba y resultado; p. ej.
+      "fragmento eliminado tras `replaceState`: sí"), nunca el token.
+  - **Sin omisiones silenciosas**: `--strict-markers`; un `conftest` hace **fallar** (no omitir)
+    las pruebas `stack` y `e2e` si el stack no responde; pytest con 0 pruebas recogidas (código 5)
+    hace fallar el trabajo; no se permite `pytest.skip` por falta de infraestructura.
+  - Falla con severidad alta o crítica. **Supresiones** según `docs/security/suppressions.md`:
+    justificación, alcance (regla y ubicación), responsable, fecha de revisión y aprobación en el PR
+    mediante `.github/pull_request_template.md` (corrección C3).
 - **Verificación**: trazabilidad FR/SC → pruebas en `plan.md`.
 
 ## R17. Dependencias, versiones y bloqueo
@@ -614,15 +730,14 @@ la primera tarea de implementación):
 | pytest, pytest-django, pytest-cov | Pruebas | Principio V |
 | pip-tools | Desarrollo | Bloqueo con hashes |
 | Semgrep, Bandit, pip-audit, npm audit, Trivy | CI | SAST, SCA y contenedores |
-| Playwright (solo en CI, opcional) | Pruebas | TS-S24 (limpieza del fragmento en el navegador). Si se descarta, TS-S24 pasa a ser una verificación manual documentada |
+| `@playwright/test` (`devDependencies` del frontend) | Pruebas E2E | **Obligatoria** (corrección G3). Es la única forma reproducible de verificar comportamientos que solo existen en el navegador: atributos `autocomplete`, pegado de contraseñas y compatibilidad con gestores (FR-005), y limpieza del fragmento con el token (R7, TS-S24). Solo se usa en desarrollo y CI; no forma parte de la imagen ni del bundle de producción |
 
 **No se añaden**: Redis, Celery, `django-cors-headers`, `djangorestframework-simplejwt`,
 `django-otp`, `django-axes`, `django-ratelimit`, `freezegun` ni `drf-spectacular`.
 
 ## Observaciones fuera del alcance
 
-- La spec no incluye un cambio voluntario de contraseña con sesión iniciada.
-- **Discrepancia con la spec**: la caducidad de recuperación de 30 min exige enmendar FR-046 y el
-  escenario 2 de US7 (hoy 15 min) antes de `/speckit-tasks`.
+- El cambio voluntario de contraseña con sesión iniciada está declarado fuera del alcance en la spec
+  (Out of Scope), y FR-012 enumera los cambios de credenciales contemplados (corrección S2).
 - Mejoras opcionales: doble aprobación de reinicios de MFA sobre Administradores; cadena de hashes
   en la auditoría.

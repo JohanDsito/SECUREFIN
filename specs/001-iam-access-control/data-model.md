@@ -60,29 +60,40 @@ stateDiagram-v2
 | key_verifier 🔒 | varchar(72), PK | `"<versión>$" + hex(HMAC-SHA-256(SESSION_HMAC_KEYS[versión], "securefin:session:" + clave))`; como máximo 6 + 1 + 64 = 71 caracteres |
 | key_version | varchar(6), índice | `CHECK (key_verifier LIKE key_version \|\| '$%')` |
 | session_data | text | Codificado y firmado por Django |
-| expire_date | timestamptz, índice | Inactividad de 15 min; se renueva en cada petición |
+| expire_date | timestamptz, índice | **Caducidad absoluta, nunca extendida**, siempre desde el `created_at` inicial: `created_at + 5/10 min` (`pre_auth`) y `created_at + 8 h` (`full` y demás) |
 | public_id | uuid, único | El único identificador expuesto por la API |
-| user | FK User nulo, índice | Desnormalizado desde los datos al guardar |
-| auth_level | varchar(10) | `anonymous` \| `pre_auth` \| `full` |
-| created_at | timestamptz | Solo al insertar |
-| authenticated_at | timestamptz nulo | Límite absoluto de 8 h; se conserva al rotar la clave salvo en el login |
-| last_activity_at | timestamptz | |
+| user | FK User, índice | **Propietario en `pre_auth` y en `full`**: desde `_sf_pending_user_id` (`pre_auth`) o `_auth_user_id` (`full`). Solo correlaciona (revocación, expiración y eventos); no autentica ni da permisos (U3) |
+| auth_level | varchar(10) | `pre_auth` \| `full`. No se persisten sesiones anónimas (I1) |
+| created_at | timestamptz | **Creación inicial de la sesión** y base del límite absoluto de 8 h (FR-011). Se hereda en cada rotación (`pre_auth` → `full`, login y cambios de MFA); ninguna rotación lo reinicia (I3) |
+| authenticated_at | timestamptz nulo | Momento del paso a `full`; informativo, sin efecto en la caducidad |
+| last_activity_at | timestamptz | **Inactividad de 15 min**: se renueva en el servidor con un `UPDATE` directo (granularidad de 60 s), sin modificar `session_data` ni reemitir la cookie (R2, R13) |
 | ip_address | inet nulo | |
 | user_agent | varchar(200) nulo | Truncado |
 
 - **No existe ninguna columna con la clave en claro** ni ningún campo `session_key`. El acceso
   heredado por ese nombre falla de forma cerrada.
 - La tabla `django_session` no existe (`django.contrib.sessions` no se instala).
+- **Sin sesiones anónimas** (I1): `GET /auth/csrf` no crea filas (`CSRF_USE_SESSIONS = False`; la
+  cookie CSRF es independiente). La primera fila nace al validar la contraseña: `pre_auth` si hace
+  falta MFA y `full` si no. Su `created_at` es el origen del límite de 8 h y se hereda en las
+  rotaciones.
+- **`_sf_pending_user_id`** (U3): clave interna de los datos de una sesión `pre_auth` que identifica
+  al usuario con la contraseña validada y el MFA pendiente. No equivale a autenticación
+  (`request.user` es anónimo), no permite acceder a endpoints protegidos y solo se usa para
+  correlacionar. `revoke_all(user_id)` borra las filas `pre_auth` y `full` de ese usuario.
+- La cookie `__Host-sf_session` solo se emite al crear o rotar la sesión (`SESSION_SAVE_EVERY_REQUEST
+  = False`), nunca en cada respuesta.
+- `session_expired` se registra solo cuando una fila con `user_id` se encuentra caducada al
+  reutilizarse; las cookies sin fila correspondiente no generan eventos.
 - Índices: `(user, expire_date)`, `key_version`, `public_id`.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> anonymous: primera petición (CSRF)
-    anonymous --> pre_auth: contraseña válida + MFA pendiente (rota la clave)
-    anonymous --> full: contraseña válida, rol sin MFA activo ni obligatorio (rota la clave)
+    [*] --> pre_auth: contraseña válida + MFA activo u obligatorio (primera fila; created_at; _sf_pending_user_id)
+    [*] --> full: contraseña válida y sin MFA necesario (primera fila; created_at)
     pre_auth --> full: TOTP / código de recuperación / alta confirmada (rota la clave)
     pre_auth --> [*]: 5/10 min · logout · solicitud de reinicio de MFA
-    full --> [*]: 15 min inactividad · 8 h absolutas · logout · revocación
+    full --> [*]: 15 min sin actividad (last_activity_at) · 8 h desde el created_at inicial (expire_date) · logout · revocación
 ```
 
 ### TOTPDevice (`iam.TOTPDevice`)
@@ -118,7 +129,7 @@ lote anterior.
 |---|---|---|
 | id | uuid | PK |
 | user | FK User | |
-| purpose | enum | `account_activation` (24 h) \| `password_reset` (30 min; ⚠️ requiere enmendar FR-046, que hoy fija 15 min) |
+| purpose | enum | `account_activation` (24 h) \| `password_reset` (15 min, FR-046) |
 | verifier 🔒 | char(64), único | HMAC-SHA-256(TOKEN_HMAC_KEYS[v], purpose + ":" + token) |
 | key_version | varchar(6) | |
 | created_at / expires_at | timestamptz | Se generan **en la entrega** (outbox, R9) |
@@ -190,7 +201,8 @@ stateDiagram-v2
 |---|---|---|
 | id | uuid | PK |
 | scope | enum | `account` |
-| key_digest 🔒 | char(64) | HMAC(TOKEN_HMAC_KEYS, `"throttle:acct:"` + email normalizado) |
+| key_digest 🔒 | char(64) | HMAC(**THROTTLE_HMAC_KEYS**[v], `"throttle:acct:"` + email normalizado); clave exclusiva de este fin |
+| key_version | varchar(6) | Versión de `THROTTLE_HMAC_KEYS`; las filas de versiones retiradas se purgan |
 | consecutive_failures | int | Se reinicia tras un éxito o tras 30 min sin fallos |
 | last_failure_at | timestamptz | |
 | blocked_until | timestamptz nulo | 30 s · 2^(n−5), con tope de 900 s, desde n = 5 |
@@ -224,6 +236,14 @@ stateDiagram-v2
 | Limitación | `throttle_account_delay`, `throttle_ip_limited`, `credential_stuffing_suspected` |
 | Autorización | `authz_denied` |
 | Consola | `bootstrap_admin_executed`, `break_glass_executed` |
+
+Emisores que antes no estaban asignados (corrección I1):
+
+| Evento | Emisor | Cuándo |
+|---|---|---|
+| `account_created_by_admin` | `admin_users.create_privileged_user` | Al crear la cuenta, en su misma transacción |
+| `activation_sent` | *Handler* `account_activation` del outbox | Tras entregar con éxito el correo; sin el token |
+| `session_expired` | Motor de sesión (`load`) | Solo si una fila con `user_id` se encuentra caducada al reutilizarse; nunca por cookies aleatorias, mal formadas o inexistentes |
 
 ## Roles y permisos de PostgreSQL (R14)
 

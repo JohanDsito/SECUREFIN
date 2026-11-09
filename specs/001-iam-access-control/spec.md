@@ -179,8 +179,10 @@ acciones.
 5. **Given** un Administrador, **When** crea una cuenta de Administrador o Auditor, **Then** el nuevo
    usuario recibe en el buzón de laboratorio un enlace de activación de un solo uso, establece su
    propia contraseña y configura MFA antes de operar.
-6. **Given** un Administrador con MFA activo que verificó la identidad de un usuario, **When**
-   reinicia su MFA confirmando su propio código TOTP en ese momento, **Then** el secreto TOTP y los
+6. **Given** un usuario que solicitó el reinicio de su MFA tras introducir correctamente su
+   contraseña (la solicitud solo puede iniciarse después de esa verificación) y un Administrador con
+   MFA activo que verificó su identidad, **When** el Administrador reinicia el MFA confirmando su
+   propio código TOTP en ese momento, **Then** el secreto TOTP y los
    códigos de recuperación del usuario se invalidan, sus sesiones se revocan, se le notifica en el
    buzón de laboratorio, se registran solicitante, autorizador, método de verificación y fecha, y el
    usuario debe configurar MFA de nuevo si su rol lo exige.
@@ -354,10 +356,16 @@ en los registros y que las sesiones previas quedan revocadas.
   pueda reutilizarse.
 - **FR-011**: Las sesiones MUST expirar tras 15 minutos de inactividad y, en cualquier caso, tras
   8 horas desde su creación.
-- **FR-012**: El sistema MUST revocar todas las sesiones de un usuario cuando cambie su contraseña,
-  complete una recuperación de contraseña, se le reinicie el MFA o cambie su rol o el estado de su
-  cuenta; y MUST revocar sus demás sesiones (conservando la actual) cuando él mismo active,
-  desactive o reconfigure el MFA o regenere sus códigos de recuperación.
+- **FR-012**: El sistema MUST revocar todas las sesiones de un usuario cuando se produzca alguno de
+  estos cambios de credenciales o de estado contemplados en esta feature:
+  (a) cambio de contraseña al completar una recuperación de contraseña (FR-048);
+  (b) reinicio administrativo de su MFA (FR-033);
+  (c) ejecución del procedimiento extraordinario de consola sobre su cuenta (FR-023);
+  (d) cambio de su rol;
+  (e) desactivación o reactivación de su cuenta.
+  El sistema MUST revocar sus demás sesiones, conservando la actual, cuando él mismo active,
+  desactive o reconfigure el MFA o regenere sus códigos de recuperación. El cambio voluntario de
+  contraseña con sesión iniciada queda fuera del alcance de esta feature (ver Out of Scope).
 - **FR-013**: El mecanismo de sesión y sus controles CSRF/CORS asociados MUST elegirse y
   justificarse en la planificación técnica, conforme al Principio II de la constitución; esta
   especificación no lo fija.
@@ -600,8 +608,7 @@ criterio de aceptación y prueba) MUST elaborarse en `plan.md` según el Princip
   sin reautenticación del Administrador tiene éxito.
 - **SC-009**: El 100 % de los correos generados en las pruebas se capturan en el buzón de laboratorio
   y 0 se entregan a destinos externos.
-- **SC-010**: El 95 % de los inicios de sesión sin retrasos activos se completan en menos de 2
-  segundos con 20 usuarios concurrentes en el laboratorio.
+- **SC-010**: Se cumple NFR-002, verificado mediante la prueba de carga del laboratorio.
 - **SC-011**: El 100 % de los mecanismos listados en FR-049 cuentan con documentación de cómo
   funcionan y por qué se usan, y el 100 % de los requisitos funcionales tienen pruebas reproducibles.
 
@@ -643,3 +650,6 @@ criterio de aceptación y prueba) MUST elaborarse en `plan.md` según el Princip
 - Eliminación definitiva de cuentas (solo desactivación).
 - Microservicios o servicios de identidad externos.
 - Decisiones de arquitectura interna de autenticación, que se toman en `/speckit-plan`.
+- Cambio voluntario de contraseña con sesión iniciada. En esta feature la contraseña solo se
+  establece en la activación y solo se cambia mediante recuperación (FR-048) o el procedimiento
+  extraordinario de consola (FR-023).

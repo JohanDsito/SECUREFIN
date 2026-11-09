@@ -45,4 +45,12 @@
     interfaz pública), no un diseño de implementación.
 - Corregido durante la validación: redacción normativa de FR-022, FR-035, FR-047 y NFR-005
   (negaciones expresadas como MUST NOT) y fila de procedimientos de consola de la matriz.
+- Iteración 3 (2026-11-09), tras `/speckit-analyze`, con autorización del titular:
+  - FR-012 enumera los cambios de credenciales contemplados (S2), y el cambio voluntario de
+    contraseña se declara en Out of Scope.
+  - El escenario 6 de US4 exige la verificación de contraseña antes de la solicitud de reinicio
+    (S1).
+  - SC-010 remite a NFR-002 (D1).
+  - Revalidado: todos los ítems siguen pasando y no se añadieron marcadores ni detalles de
+    implementación.
 - Items marked incomplete require spec updates before `/speckit-clarify` or `/speckit-plan`
