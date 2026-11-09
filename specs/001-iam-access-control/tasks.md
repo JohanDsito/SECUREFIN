@@ -79,13 +79,13 @@ T001–T138 y se añade T139 (*fixture* autenticado de la API de Mailpit, US4). 
 
 **Purpose**: inicializar el repositorio, las dependencias bloqueadas, los contenedores y la CI.
 
-- [ ] T001 Crear la estructura de directorios de `plan.md` → Project Structure: `backend/config/settings/`, `backend/apps/core/`, `backend/apps/iam/{models,sessions,services,crypto,policies,api,management/commands}/`, `backend/apps/audit/`, `backend/tests/{unit,integration,session_conformance,security,contract,acceptance}/`, `frontend/`, `infra/nginx/`, `infra/postgres/init/`, `docs/security/evidence/`, `.semgrep/` y `.github/workflows/`, con un `__init__.py` en cada paquete Python
-- [ ] T002 [P] Ampliar `.gitignore` con `secrets/`, `*.pem`, `*.key`, `.env`, `node_modules/`, `frontend/dist/`, `__pycache__/`, `.coverage` y `htmlcov/`
-- [ ] T003 Crear `backend/requirements.in` y `backend/requirements-dev.in`:
+- [X] T001 Crear la estructura de directorios de `plan.md` → Project Structure: `backend/config/settings/`, `backend/apps/core/`, `backend/apps/iam/{models,sessions,services,crypto,policies,api,management/commands}/`, `backend/apps/audit/`, `backend/tests/{unit,integration,session_conformance,security,contract,acceptance}/`, `frontend/`, `infra/nginx/`, `infra/postgres/init/`, `docs/security/evidence/`, `.semgrep/` y `.github/workflows/`, con un `__init__.py` en cada paquete Python
+- [X] T002 [P] Ampliar `.gitignore` con `secrets/`, `*.pem`, `*.key`, `.env`, `node_modules/`, `frontend/dist/`, `__pycache__/`, `.coverage` y `htmlcov/`
+- [X] T003 Crear `backend/requirements.in` y `backend/requirements-dev.in`:
   - **`requirements.in`**: `Django>=5.2.17,<5.3` (usar la última 5.2.x publicada); `djangorestframework` (por ahora la última 3.16.x; la 3.18.1 se evalúa en T126); `argon2-cffi`, `cryptography`, `pyotp`, `segno`, `psycopg[binary]>=3` y `gunicorn`.
   - **`requirements-dev.in`**: `pytest`, `pytest-django`, `pytest-cov`, `pip-tools`, `bandit` y `pip-audit`.
   - Compilar con `pip-compile --generate-hashes` sobre Python 3.13 en `backend/requirements.txt` y `backend/requirements-dev.txt` (R17).
-- [ ] T004 Crear la configuración de Django en `backend/config/settings/base.py`, `lab.py` y `test.py`, más `backend/config/urls.py` y `backend/config/wsgi.py` (R2, R3, R4, R12, R13, R14):
+- [X] T004 Crear la configuración de Django en `backend/config/settings/base.py`, `lab.py` y `test.py`, más `backend/config/urls.py` y `backend/config/wsgi.py` (R2, R3, R4, R12, R13, R14):
   - **Aplicaciones**: `INSTALLED_APPS` **sin** `django.contrib.admin` **ni** `django.contrib.sessions`.
   - **Usuario**: `AUTH_USER_MODEL = "iam.User"`.
   - **Sesión**: `SESSION_ENGINE = "apps.iam.sessions.store"`, `SESSION_COOKIE_NAME = "__Host-sf_session"`, `SESSION_COOKIE_SECURE = SESSION_COOKIE_HTTPONLY = True`, `SESSION_COOKIE_SAMESITE = "Strict"`, **`SESSION_SAVE_EVERY_REQUEST = False`**, `SESSION_EXPIRE_AT_BROWSER_CLOSE = True` (cookie sin `Expires`) y `SESSION_COOKIE_AGE = 28800` (solo como tope absoluto de 8 h). La inactividad de 15 min la controla el motor con `last_activity_at` (R2, R13; corrección C2). La cookie solo se emite al crear o rotar la sesión.
@@ -96,33 +96,33 @@ T001–T138 y se añade T139 (*fixture* autenticado de la API de Mailpit, US4). 
   - **Base de datos** (corrección U1): `DATABASES` con `OPTIONS: {"options": "-c search_path=securefin"}`; el usuario y la contraseña se leen de `DB_USER` y `DB_PASSWORD_FILE` del entorno de **cada servicio**. En ejecución (`backend`, `mailer`), siempre `securefin_app` y `/run/secrets/db_app_password`; solo el servicio `migrate` recibe `securefin_owner` y `/run/secrets/db_owner_password`. Variable `SECUREFIN_PROCESS_ROLE` (`runtime` \| `migrate`) que valida T027.
   - **Correo**: `EMAIL_BACKEND` SMTP hacia `mailpit:1025` sin TLS y `EMAIL_TIMEOUT = 3`; en `test.py`, `locmem`.
   - **Entorno**: `DEBUG = False` en `lab.py`.
-- [ ] T005 Configurar Pytest en `backend/pytest.ini` y `backend/tests/conftest.py`:
+- [X] T005 Configurar Pytest en `backend/pytest.ini` y `backend/tests/conftest.py`:
   - Marcadores `unit` (sin base de datos), `integration`, `session_conformance`, `security`, `contract`, `acceptance` y `stack` (necesita el stack de Compose); `--strict-markers`; `DJANGO_SETTINGS_MODULE = config.settings.test`.
   - Para las pruebas `stack`, un *hook* en `conftest.py` hace **fallar** (nunca `skip`) si el stack no responde (corrección U2).
   - Fixtures: cliente API con ayuda CSRF (obtiene `/api/v1/auth/csrf` y envía `X-CSRFToken` + `Origin: https://securefin.local`), funciones para crear usuarios ficticios por rol y fixture de reloj que parchea `apps.core.clock.now`.
-- [ ] T006 [P] Inicializar el frontend en `frontend/` (`package.json`, `package-lock.json`, `vite.config.js`, `index.html`, `src/main.jsx`, `src/App.jsx`):
+- [X] T006 [P] Inicializar el frontend en `frontend/` (`package.json`, `package-lock.json`, `vite.config.js`, `index.html`, `src/main.jsx`, `src/App.jsx`):
   - Vite + React 19 + react-router, sin otras dependencias de ejecución.
   - `@playwright/test` **solo en `devDependencies`** (justificado en R17, corrección G3), con `frontend/tests/e2e/` y `frontend/playwright.config.js` (`baseURL https://securefin.local`, CA de laboratorio aceptada). No forma parte del bundle ni de la imagen de Nginx.
   - **Protección de tokens** en `playwright.config.js` (corrección U1): `use: { trace: "off", video: "off", screenshot: "off" }`, `reporter: [["list"]]` (sin informe HTML ni JSON) y un `outputDir` temporal fuera del repositorio que se borra en `globalTeardown`. Una regla de Semgrep en `.semgrep/securefin.yml` (T013) prohíbe `console.log` en `frontend/tests/e2e/`.
   - En desarrollo, proxy de `/api` en `vite.config.js` para conservar el mismo origen (R3).
-- [ ] T007 [P] Crear `backend/Dockerfile` multietapa:
+- [X] T007 [P] Crear `backend/Dockerfile` multietapa:
   - Base `python:3.13-slim@sha256:<digest>` y usuario no root.
   - `pip install --require-hashes --no-deps -r requirements.txt`.
   - Arranque con `gunicorn config.wsgi --workers 4 --threads 1` (R4, R17).
-- [ ] T008 [P] Crear `infra/nginx/Dockerfile` multietapa: compila el frontend con `node:22-alpine@sha256:<digest>` (`npm ci && npm run build`) y copia `dist/` a `nginx:1.28-alpine@sha256:<digest>`
-- [ ] T009 [P] Crear `infra/postgres/init/01-roles.sh`, que lee las contraseñas de `/run/secrets` (R14):
+- [X] T008 [P] Crear `infra/nginx/Dockerfile` multietapa: compila el frontend con `node:22-alpine@sha256:<digest>` (`npm ci && npm run build`) y copia `dist/` a `nginx:1.28-alpine@sha256:<digest>`
+- [X] T009 [P] Crear `infra/postgres/init/01-roles.sh`, que lee las contraseñas de `/run/secrets` (R14):
   - Roles `securefin_owner` (LOGIN) y `securefin_app` (LOGIN).
   - `CREATE SCHEMA securefin AUTHORIZATION securefin_owner` y `REVOKE ALL ON SCHEMA public FROM PUBLIC`.
   - `GRANT USAGE ON SCHEMA securefin TO securefin_app`, sin CREATE.
   - `ALTER DEFAULT PRIVILEGES FOR ROLE securefin_owner IN SCHEMA securefin GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO securefin_app`.
-- [ ] T010 Crear `infra/nginx/nginx.conf` (R3, R7, R10, R12):
+- [X] T010 Crear `infra/nginx/nginx.conf` (R3, R7, R10, R12):
   - **TLS**: `server` en 443 con TLS 1.2/1.3 y certificado de la CA de laboratorio; `server` en 80 que redirige a 443.
   - **Cabeceras**: `Strict-Transport-Security`, la CSP literal de `contracts/iam-api.md` §6, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` y `Cache-Control: no-store` para `index.html`.
   - **SPA**: `try_files` hacia `index.html`.
   - **API**: `location /api/` → `backend:8000` con `X-Forwarded-For` y `X-Forwarded-Proto`; `client_max_body_size 16k`; `limit_req` de 10 r/s con ráfaga de 20 en `/api/v1/auth/`.
   - **Logs**: `log_format` sin cuerpos, cookies ni `Authorization`.
   - **Mailpit**: segundo `server` en `listen 8025 ssl` (TLS 1.2/1.3, certificado de laboratorio con SAN `IP:127.0.0.1`) con `auth_basic` → `proxy_pass http://mailpit:8025` (interfaz y API `/api/v1/`). Reenvía la cabecera `Authorization` para que Mailpit valide la **misma** credencial Basic, y **no** acepta HTTP plano en 8025 (Principio III; R10).
-- [ ] T011 Crear `infra/compose.yaml` (R10, R14, `plan.md` → Despliegue):
+- [X] T011 Crear `infra/compose.yaml` (R10, R14, `plan.md` → Despliegue):
   - **Servicios**: `nginx`, `backend`, `mailer` (comando `iam_deliver_outbox`), `migrate` (de un solo uso: `migrate` + `createcachetable`), `db` (`postgres:17@sha256:<digest>`) y `mailpit` (`axllent/mailpit:vX.Y.Z@sha256:<digest>`).
   - **Redes**: `edge_net` (bridge); `app_net`, `data_net` y `mail_net` con `internal: true`.
   - **Miembros**: nginx → edge, app, mail; backend → app, data; mailer → data, mail; migrate → data; db → data; mailpit → mail.
@@ -137,9 +137,9 @@ T001–T138 y se añade T139 (*fixture* autenticado de la API de Mailpit, US4). 
 
     Con dependencias `depends_on: condition: service_healthy`.
   - **Mailpit**: `MP_MAX_MESSAGES=200`, `MP_MAX_AGE=24h`, `MP_UI_AUTH_FILE` y `MP_BLOCK_REMOTE_CSS_AND_FONTS=true`, y **ninguna** variable `MP_SMTP_RELAY_*`.
-- [ ] T012 [P] Crear `.env.example` y `docs/security/secrets.md`: generación con `openssl rand -base64 32` de las cinco claves (`DJANGO_SECRET_KEY`, `SESSION_HMAC_KEYS`, `TOKEN_HMAC_KEYS`, `THROTTLE_HMAC_KEYS` y `TOTP_ENCRYPTION_KEYS`, una por propósito y todas distintas) y de las contraseñas de los roles (quickstart §2), CA y certificado TLS de laboratorio con OpenSSL (SAN `DNS:securefin.local` e `IP:127.0.0.1`, este último para el proxy de Mailpit), y credenciales de autenticación básica de Nginx y Mailpit, sin valores reales
-- [ ] T013 [P] Crear las reglas de Semgrep propias en `.semgrep/securefin.yml`: prohibir `csrf_exempt` y la importación de `corsheaders`; prohibir el acceso a `.session_key` fuera de `backend/apps/iam/sessions/`; alertar de `objects.` en `backend/apps/iam/api/views/`; prohibir `localStorage` y `sessionStorage` en `frontend/src/`; prohibir `console.log`, `console.info` y `page.screenshot` en `frontend/tests/e2e/` (U1)
-- [ ] T014 Crear el pipeline de CI en `.github/workflows/ci.yml` con **cuatro trabajos separados** (R16; correcciones U2 y U4):
+- [X] T012 [P] Crear `.env.example` y `docs/security/secrets.md`: generación con `openssl rand -base64 32` de las cinco claves (`DJANGO_SECRET_KEY`, `SESSION_HMAC_KEYS`, `TOKEN_HMAC_KEYS`, `THROTTLE_HMAC_KEYS` y `TOTP_ENCRYPTION_KEYS`, una por propósito y todas distintas) y de las contraseñas de los roles (quickstart §2), CA y certificado TLS de laboratorio con OpenSSL (SAN `DNS:securefin.local` e `IP:127.0.0.1`, este último para el proxy de Mailpit), y credenciales de autenticación básica de Nginx y Mailpit, sin valores reales
+- [X] T013 [P] Crear las reglas de Semgrep propias en `.semgrep/securefin.yml`: prohibir `csrf_exempt` y la importación de `corsheaders`; prohibir el acceso a `.session_key` fuera de `backend/apps/iam/sessions/`; alertar de `objects.` en `backend/apps/iam/api/views/`; prohibir `localStorage` y `sessionStorage` en `frontend/src/`; prohibir `console.log`, `console.info` y `page.screenshot` en `frontend/tests/e2e/` (U1)
+- [X] T014 Crear el pipeline de CI en `.github/workflows/ci.yml` con **cuatro trabajos separados** (R16; correcciones U2 y U4):
   - **`static`**: `semgrep ci` (`p/django`, `p/python`, `p/react`, `p/secrets` y `.semgrep/`), `bandit -r backend/ -ll`, `pip-audit -r backend/requirements.txt --require-hashes`, `npm ci && npm audit --omit=dev` y `trivy fs --scanners misconfig,secret .`.
   - **`unit`**: `pytest -m unit` (sin base de datos).
   - **`integration`**: servicio `postgres:17` inicializado con `infra/postgres/init/01-roles.sh`; `pytest -m "integration or session_conformance or security or contract or acceptance" -m "not stack" --cov`.
@@ -153,7 +153,7 @@ T001–T138 y se añade T139 (*fixture* autenticado de la API de Mailpit, US4). 
     - **Sin artefactos sensibles** (corrección U1): el trabajo **no** usa `actions/upload-artifact` para `test-results/`, `playwright-report/`, trazas, vídeos ni capturas. Solo se conserva como evidencia el resumen textual sanitizado del reporter `list` (nombres de prueba y resultado). Los pasos no imprimen URLs completas, tokens ni cuerpos de correo.
   - **Sin omisiones silenciosas**: cada paso de pytest falla con 0 pruebas recogidas (código 5); `--strict-markers`; el resumen debe mostrar 0 `skipped` en `stack` y `e2e`.
   - Todo el pipeline falla con severidad alta o crítica; las supresiones siguen T129.
-- [ ] T129 [P] Crear `.github/pull_request_template.md` y `docs/security/suppressions.md` (Principio V; corrección C3):
+- [X] T129 [P] Crear `.github/pull_request_template.md` y `docs/security/suppressions.md` (Principio V; corrección C3):
   - Toda supresión de un hallazgo (Semgrep, Bandit, pip-audit, npm audit o Trivy) debe registrar **justificación**, **alcance** (herramienta, regla e identificador, archivo o línea o paquete; nunca reglas desactivadas globalmente), **responsable** y **fecha de revisión**, y aprobarse explícitamente en el PR.
   - Se distingue un *falso positivo* (supresión específica en el código o en el archivo de la herramienta, con comentario que remite al PR) de una *excepción por riesgo real* (registro adicional en `plan.md` → Complexity Tracking).
   - La plantilla de PR incluye la casilla de supresiones con esos campos y la verificación de que no se introducen secretos.
@@ -170,40 +170,40 @@ existir antes de la primera migración.
 
 ### Pruebas fundamentales (escribir primero; deben fallar)
 
-- [ ] T015 [P] Prueba unitaria TS-U07 en `backend/tests/unit/test_keys.py`:
+- [X] T015 [P] Prueba unitaria TS-U07 en `backend/tests/unit/test_keys.py`:
   - El arranque falla si falta alguna de `DJANGO_SECRET_KEY`, `SESSION_HMAC_KEYS`, `TOKEN_HMAC_KEYS`, **`THROTTLE_HMAC_KEYS`** o `TOTP_ENCRYPTION_KEYS`.
   - También falla si alguna versión mide menos de 32 bytes o si **dos claves cualesquiera coinciden**, en particular `THROTTLE_HMAC_KEYS` frente a `TOKEN_HMAC_KEYS` o `SESSION_HMAC_KEYS` (C1).
   - Un proceso con `SECUREFIN_PROCESS_ROLE=runtime` conectado como `securefin_owner` no arranca (U1).
   - El error no revela valores.
-- [ ] T016 [P] Prueba unitaria TS-U06 en `backend/tests/unit/test_hmac_verifiers.py`:
+- [X] T016 [P] Prueba unitaria TS-U06 en `backend/tests/unit/test_hmac_verifiers.py`:
   - El verificador de sesión tiene el formato `^v\d{1,5}\$[0-9a-f]{64}$`.
   - Hay separación de dominio: `"securefin:session:"`, `"<purpose>:"` y `"throttle:acct:"` producen verificadores distintos para la misma entrada.
   - **Separación de claves** (C1): `session_verifier` solo usa `SESSION_HMAC_KEYS`, `token_verifier` solo `TOKEN_HMAC_KEYS` y `throttle_digest` solo `THROTTLE_HMAC_KEYS`; cambiar una clave no altera los resultados de las otras dos funciones.
   - Un token de `account_activation` no verifica como `password_reset`.
-- [ ] T017 [P] Prueba unitaria TS-U05 en `backend/tests/unit/test_codes.py`:
+- [X] T017 [P] Prueba unitaria TS-U05 en `backend/tests/unit/test_codes.py`:
   - El código de recuperación tiene **28 caracteres** del alfabeto base32 de Crockford (al menos 128 bits) y se muestra como 7 grupos de 4 separados por `-`.
   - La normalización acepta minúsculas, espacios y guiones y mapea `I`/`L`→`1` y `O`→`0`.
   - No hay duplicados en 10⁵ muestras.
   - El código de verificación tiene 8 caracteres en base32 de Crockford.
-- [ ] T018 [P] Prueba unitaria TS-U01 en `backend/tests/unit/test_password_hasher.py`: el hash empieza por `$argon2id$v=19$m=65536,t=3,p=1` y `PASSWORD_HASHERS` contiene un único hasher
-- [ ] T019 [P] Conformidad de sesión TS-SC01–SC04 en `backend/tests/session_conformance/test_schema_and_storage.py`:
+- [X] T018 [P] Prueba unitaria TS-U01 en `backend/tests/unit/test_password_hasher.py`: el hash empieza por `$argon2id$v=19$m=65536,t=3,p=1` y `PASSWORD_HASHERS` contiene un único hasher
+- [X] T019 [P] Conformidad de sesión TS-SC01–SC04 en `backend/tests/session_conformance/test_schema_and_storage.py`:
   - **SC01**: `iam_usersession` no tiene columna `session_key` y `django_session` no existe.
   - **SC02**: claves de 256 bits URL-safe sin colisiones en 10⁴.
   - **SC03**: `key_verifier` coincide con `v1$[0-9a-f]{64}`, mide como máximo 72 caracteres y se cumple la restricción `CHECK` de versión.
   - **SC04**: con `connection.execute_wrapper`, el valor de la cookie nunca aparece en el SQL ni en los parámetros durante el ciclo csrf → login → peticiones → logout.
-- [ ] T020 [P] Conformidad de sesión TS-SC05–SC10 en `backend/tests/session_conformance/test_lifecycle.py`:
+- [X] T020 [P] Conformidad de sesión TS-SC05–SC10 en `backend/tests/session_conformance/test_lifecycle.py`:
   - **SC05**: una cookie aleatoria, mal formada o de una versión retirada produce sesión vacía y clave nueva, y la presentada no se adopta.
   - **SC06**: un identificador presentado antes de autenticarse nunca se adopta, y la clave rota de `pre_auth` a `full` y tras los cambios de MFA.
   - **SC07**: los datos modificados persisten y `expire_date` **no** se extiende (es absoluta).
   - **SC08**: 15 min sin actividad según `last_activity_at` (reloj simulado) dan 401; actividad cada 10 min durante 1 h mantiene la sesión válida.
   - **SC09**: 8 h desde el `created_at` inicial con actividad continua dan 401, y `cycle_key` hereda `created_at` (I3).
   - **SC10**: `revoke_all`, el borrado por `public_id` y el logout dejan la fila inexistente y la siguiente petición da 401.
-- [ ] T021 [P] Conformidad de sesión TS-SC11–SC14 en `backend/tests/session_conformance/test_concurrency_rotation.py`:
+- [X] T021 [P] Conformidad de sesión TS-SC11–SC14 en `backend/tests/session_conformance/test_concurrency_rotation.py`:
   - **SC11** (`transactional_db`, dos conexiones): una revocación durante una petición en curso produce `SessionInterrupted` sin resurrección; no hay colisiones en creaciones simultáneas.
   - **SC12**: tras activar `v2`, las sesiones `v1` siguen válidas y las nuevas usan `v2`; `iam_rotate_session_key --retire v1` → 401; la rotación de emergencia → todas 401.
   - **SC13**: los métodos asíncronos lanzan `NotImplementedError` y el acceso por `session_key=` lanza `FieldError`.
   - **SC14**: el volcado de la base de datos tras la suite no contiene ninguna cookie emitida.
-- [ ] T134 [P] Conformidad de sesión TS-SC15–SC20 en `backend/tests/session_conformance/test_cookie_emission.py` (correcciones C2, I1 de la revisión 3 e I3):
+- [X] T134 [P] Conformidad de sesión TS-SC15–SC20 en `backend/tests/session_conformance/test_cookie_emission.py` (correcciones C2, I1 de la revisión 3 e I3):
   - **SC15**: en GET y POST autenticados que no modifican la sesión (p. ej. `GET /auth/session`, `GET /users/me/profile`), la respuesta **no** contiene `Set-Cookie: __Host-sf_session`. Sí aparece solo en la creación, el login, la elevación de `pre_auth` a `full` y la rotación tras cambios de MFA, y como borrado en el logout.
   - **SC16**: tras una petición autenticada con ≥ 60 s desde la anterior (reloj simulado), `last_activity_at` avanza mientras `session_data`, `expire_date` y `key_verifier` quedan idénticos byte a byte, y `request.session.modified` es falso; con menos de 60 s, no hay escritura.
   - **SC19** (corrección I1): `GET /auth/csrf` y un `POST /auth/login` con credenciales erróneas crean **0** filas `UserSession` (recuento antes y después) y no emiten `Set-Cookie: __Host-sf_session`; solo aparece `__Host-sf_csrftoken`. Un POST anónimo sin `X-CSRFToken` sigue dando **403**, y con el token válido se procesa sin crear sesión si las credenciales fallan.
@@ -215,39 +215,39 @@ existir antes de la primera migración.
     - Al pasar a `full`, `_sf_pending_user_id` desaparece de `session_data` y `user_id` se mantiene.
   - **SC18** (corrección I3): una sesión `pre_auth` creada en t₀ y elevada a `full` en t₀ + 9 min (reloj simulado) da **401 en t₀ + 8 h + 1 s**, con actividad cada 10 min. La fila `full` conserva el mismo `created_at` que la `pre_auth` y `expire_date = created_at + 8 h`. Una rotación por cambio de MFA en t₀ + 4 h no mueve `created_at` ni `expire_date`. Sin actividad, la sesión sigue cortando a los 15 min.
   - **SC17**: una sesión con `user_id` caducada por inactividad o por el límite absoluto y reutilizada genera exactamente 1 `session_expired`, con su motivo (`idle`, `absolute` o `pre_auth_timeout`). Una cookie aleatoria, mal formada, inexistente, de versión retirada o de una sesión ya purgada genera **0** eventos.
-- [ ] T022 [P] Seguridad TS-S16/TS-S26 en `backend/tests/security/test_db_privileges.py`, conectando como `securefin_app`:
+- [X] T022 [P] Seguridad TS-S16/TS-S26 en `backend/tests/security/test_db_privileges.py`, conectando como `securefin_app`:
   - UPDATE, DELETE y TRUNCATE sobre `securefin.audit_securityevent` fallan, y `has_table_privilege('securefin_app','securefin.audit_securityevent','UPDATE')` es falso.
   - `ALTER TABLE` y `DROP TRIGGER` fallan.
-- [ ] T023 [P] Seguridad TS-S05/S06/S07 en `backend/tests/security/test_csrf_cors.py`: se recorren **todas** las rutas del `URLResolver` con métodos POST, PUT, PATCH y DELETE; sin `X-CSRFToken` dan 403; ninguna respuesta incluye `Access-Control-Allow-Origin`; un `Origin` ajeno se rechaza. La prueba crece sola con cada ruta nueva.
-- [ ] T024 [P] Seguridad TS-S23 en `backend/tests/security/test_route_inventory.py`: la ruta `/admin/` de Django da 404 y no existe ninguna ruta anónima que cree usuarios con rol `admin` o `auditor`
-- [ ] T025 [P] Integración TS-I11 en `backend/tests/integration/test_tokens.py`:
+- [X] T023 [P] Seguridad TS-S05/S06/S07 en `backend/tests/security/test_csrf_cors.py`: se recorren **todas** las rutas del `URLResolver` con métodos POST, PUT, PATCH y DELETE; sin `X-CSRFToken` dan 403; ninguna respuesta incluye `Access-Control-Allow-Origin`; un `Origin` ajeno se rechaza. La prueba crece sola con cada ruta nueva.
+- [X] T024 [P] Seguridad TS-S23 en `backend/tests/security/test_route_inventory.py`: la ruta `/admin/` de Django da 404 y no existe ninguna ruta anónima que cree usuarios con rol `admin` o `auditor`
+- [X] T025 [P] Integración TS-I11 en `backend/tests/integration/test_tokens.py`:
   - Emisión y canje de un solo uso; uno nuevo invalida los anteriores del mismo usuario y propósito.
   - Un token alterado o de otro propósito se rechaza.
   - **Caducidades con reloj simulado**: `account_activation` válido a las 23:59:59 h y rechazado a las 24:00:01 h; `password_reset` válido a los 14:59 min y rechazado a los 15:01 min (FR-046).
   - Un canje concurrente con `select_for_update` no admite doble uso.
-- [ ] T026 [P] Integración TS-I18/TS-I12/TS-I13 en `backend/tests/integration/test_outbox.py`:
+- [X] T026 [P] Integración TS-I18/TS-I12/TS-I13 en `backend/tests/integration/test_outbox.py`:
   - La tabla `iam_outboxmessage` no contiene tokens, códigos ni cuerpos de correo.
   - Con SMTP caído: reintentos con espera exponencial, `failed` tras 5 intentos y evento `email_delivery_failed` sin secretos.
   - Los correos solo van al backend configurado (en las pruebas, `locmem`).
 
 ### Implementación fundamental
 
-- [ ] T027 [P] Implementar `backend/apps/core/keys.py`, validando en el `AppConfig.ready()` de `backend/apps/core/apps.py` (R8):
+- [X] T027 [P] Implementar `backend/apps/core/keys.py`, validando en el `AppConfig.ready()` de `backend/apps/core/apps.py` (R8):
   - Lee los secretos de `/run/secrets/*`.
   - `SESSION_HMAC_KEYS`, `TOKEN_HMAC_KEYS`, **`THROTTLE_HMAC_KEYS`** y `TOTP_ENCRYPTION_KEYS` son mapas versionados con una versión activa y las anteriores aceptadas: **una clave por propósito criptográfico** (C1).
   - Valida al arrancar presencia, al menos 32 bytes por versión y que **todas las claves y versiones sean distintas entre sí**, y falla de forma cerrada.
   - Si `SECUREFIN_PROCESS_ROLE=runtime` y `DB_USER` es `securefin_owner`, se niega a arrancar (U1).
-- [ ] T028 [P] Implementar los módulos de `core`:
+- [X] T028 [P] Implementar los módulos de `core`:
   - `backend/apps/core/clock.py` con `now()` inyectable.
   - `backend/apps/core/middleware.py` con un `RequestIdMiddleware` que genera un UUID por petición.
   - `backend/apps/core/logging.py` con un formateador JSON y un filtro de redacción de las claves `password`, `token`, `secret`, `code`, `otp`, `session`, `cookie` y `authorization`.
-- [ ] T029 [P] Implementar `backend/apps/iam/crypto/hmac_verifiers.py` (R2, R7, R12):
+- [X] T029 [P] Implementar `backend/apps/iam/crypto/hmac_verifiers.py` (R2, R7, R12):
   - `session_verifier(version, key)` → `f"{version}${hex(HMAC-SHA-256(SESSION_HMAC_KEYS[version], 'securefin:session:' + key))}"`.
   - `token_verifier(purpose, token, version)` con `TOKEN_HMAC_KEYS`.
   - `throttle_digest(email, version)` → `HMAC-SHA-256(THROTTLE_HMAC_KEYS[version], "throttle:acct:" + email normalizado)`. **Nunca** usa `TOKEN_HMAC_KEYS` ni `SESSION_HMAC_KEYS` (C1).
   - `verify()` con `hmac.compare_digest`.
-- [ ] T030 [P] Implementar `backend/apps/iam/crypto/codes.py`: `generate_recovery_code()` (28 caracteres de `secrets.choice` sobre base32 de Crockford, 140 bits), `format_code()` (7×4 con `-`), `normalize_code()` y `generate_verification_code()` (8 caracteres) (R6, R11)
-- [ ] T031 Crear el modelo `User` en `backend/apps/iam/models/user.py`, más su manager y la migración inicial en `backend/apps/iam/migrations/0001_initial.py` (data-model → User):
+- [X] T030 [P] Implementar `backend/apps/iam/crypto/codes.py`: `generate_recovery_code()` (28 caracteres de `secrets.choice` sobre base32 de Crockford, 140 bits), `format_code()` (7×4 con `-`), `normalize_code()` y `generate_verification_code()` (8 caracteres) (R6, R11)
+- [X] T031 Crear el modelo `User` en `backend/apps/iam/models/user.py`, más su manager y la migración inicial en `backend/apps/iam/migrations/0001_initial.py` (data-model → User):
 
   | Campo | Restricción |
   |---|---|
@@ -260,8 +260,8 @@ existir antes de la primera migración.
   | `created_at`, `last_login_at`, `password_changed_at` | — |
 
   Sin `is_staff`, `is_superuser` ni grupos.
-- [ ] T032 [P] Implementar `backend/apps/iam/policies/hashers.py` con `SecureFinArgon2Hasher` (subclase de `Argon2PasswordHasher`; `memory_cost=65536`, `time_cost=3`, `parallelism=1`). No reducir sin aprobación (R4).
-- [ ] T033 Crear el modelo `UserSession` en `backend/apps/iam/models/session.py` y su migración (data-model → UserSession). **No hay ningún campo `session_key`**.
+- [X] T032 [P] Implementar `backend/apps/iam/policies/hashers.py` con `SecureFinArgon2Hasher` (subclase de `Argon2PasswordHasher`; `memory_cost=65536`, `time_cost=3`, `parallelism=1`). No reducir sin aprobación (R4).
+- [X] T033 Crear el modelo `UserSession` en `backend/apps/iam/models/session.py` y su migración (data-model → UserSession). **No hay ningún campo `session_key`**.
 
   | Campo | Restricción |
   |---|---|
@@ -279,7 +279,7 @@ existir antes de la primera migración.
   | `user_agent` | varchar(200) nulo |
 
   Índices `(user, expire_date)`, `key_version` y `public_id`.
-- [ ] T034 Implementar el motor de sesión en `backend/apps/iam/sessions/store.py`, siguiendo la tabla de R2.4 (subclase de `db.SessionStore`, `get_model_class()` → `UserSession`):
+- [X] T034 Implementar el motor de sesión en `backend/apps/iam/sessions/store.py`, siguiendo la tabla de R2.4 (subclase de `db.SessionStore`, `get_model_class()` → `UserSession`):
 
   | Método | Comportamiento |
   |---|---|
@@ -293,33 +293,33 @@ existir antes de la primera migración.
   | `cycle_key` | La fila nueva **hereda el `created_at` inicial** (también de `pre_auth` a `full` y en el login) y recalcula `expire_date = created_at + 8 h` para `full`. Ninguna rotación reinicia el límite (I3) |
   | `clear_expired` | Por `expire_date` o por `created_at` de más de 8 h |
   | `aload`, `asave`, `acreate`, `aexists`, `adelete`, `acycle_key`, `aclear_expired` | Lanzan `NotImplementedError` |
-- [ ] T035 Implementar las piezas complementarias del motor de sesión:
+- [X] T035 Implementar las piezas complementarias del motor de sesión:
   - `backend/apps/iam/sessions/middleware.py` con un `SessionLifetimeMiddleware`, situado después de `SessionMiddleware`. Es la segunda capa de inactividad (15 min) y del límite absoluto (8 h), y llama a `SessionStore.touch()` para renovar `last_activity_at`, `ip_address` y `user_agent` (truncado a 200) **sin reemitir la cookie** (C2).
   - `backend/apps/iam/services/session_admin.py` con `revoke_all(user, except_current=None)` (DELETE por `user_id` de **todas** las filas del usuario, tanto `pre_auth` como `full`; evento `sessions_revoked` con el recuento por nivel; U3).
   - El comando `backend/apps/iam/management/commands/iam_rotate_session_key.py --retire vN`, que se niega si `vN` es la activa.
-- [ ] T036 Crear `SecurityEvent` en `backend/apps/audit/models.py` (data-model → SecurityEvent):
-  - Campos `id` uuid, `occurred_at` indexado, `event_type` enum con los **31 tipos literales** del catálogo, `outcome` (`success` \| `failure` \| `denied`), `actor_id`, `actor_role`, `target_type`, `target_id`, `source_ip`, `request_id` y `metadata` jsonb.
+- [X] T036 Crear `SecurityEvent` en `backend/apps/audit/models.py` (data-model → SecurityEvent):
+  - Campos `id` uuid, `occurred_at` indexado, `event_type` enum con los **32 tipos literales** del catálogo, `outcome` (`success` \| `failure` \| `denied`), `actor_id`, `actor_role`, `target_type`, `target_id`, `source_ip`, `request_id` y `metadata` jsonb.
   - El modelo impide `save()` sobre registros existentes y `delete()`.
-- [ ] T037 Implementar `backend/apps/audit/services.py` con `record_event(event_type, outcome, actor, target, source_ip=None, metadata=None)`: lista permitida de claves de `metadata` por tipo, rechazo de las claves `password`, `token`, `secret`, `code`, `otp`, `session` y `cookie`, y `request_id` tomado del middleware. Debe invocarse dentro de la transacción del llamador.
-- [ ] T038 Crear la migración `backend/apps/audit/migrations/0002_protect_audit.py` (R14) con `RunSQL`:
+- [X] T037 Implementar `backend/apps/audit/services.py` con `record_event(event_type, outcome, actor, target, source_ip=None, metadata=None)`: lista permitida de claves de `metadata` por tipo, rechazo de las claves `password`, `token`, `secret`, `code`, `otp`, `session` y `cookie`, y `request_id` tomado del middleware. Debe invocarse dentro de la transacción del llamador.
+- [X] T038 Crear la migración `backend/apps/audit/migrations/0002_protect_audit.py` (R14) con `RunSQL`:
   - Función y trigger `BEFORE UPDATE OR DELETE ... FOR EACH ROW` y trigger `BEFORE TRUNCATE ... FOR EACH STATEMENT`, ambos lanzando una excepción.
   - `REVOKE UPDATE, DELETE, TRUNCATE ON securefin.audit_securityevent FROM securefin_app`.
-- [ ] T039 [P] Implementar `backend/apps/iam/policies/matrix.py`: la "Matriz de permisos" de spec.md traducida a `ROLE_PERMISSIONS` y `ROLE_MFA_REQUIRED` (`client`: opcional; `admin` y `auditor`: obligatorio; cualquier rol nuevo, obligatorio por defecto)
-- [ ] T040 Implementar `backend/apps/iam/api/permissions.py` y `backend/apps/iam/api/exceptions.py` (R15, `contracts/iam-api.md` §1):
+- [X] T039 [P] Implementar `backend/apps/iam/policies/matrix.py`: la "Matriz de permisos" de spec.md traducida a `ROLE_PERMISSIONS` y `ROLE_MFA_REQUIRED` (`client`: opcional; `admin` y `auditor`: obligatorio; cualquier rol nuevo, obligatorio por defecto)
+- [X] T040 Implementar `backend/apps/iam/api/permissions.py` y `backend/apps/iam/api/exceptions.py` (R15, `contracts/iam-api.md` §1):
   - **Permisos**: `IsFullyAuthenticated` (`auth_level == "full"`, usuario `active` y MFA cumplido según `ROLE_MFA_REQUIRED`), `HasRolePermission(perm)` e `IsResourceOwner`. Alias `me` y consultas filtradas por propietario; un recurso ajeno da 404 y evento `authz_denied`.
   - **Configuración DRF**: `DEFAULT_PERMISSION_CLASSES = [IsFullyAuthenticated]` (denegar por defecto) y `DEFAULT_AUTHENTICATION_CLASSES = [SessionAuthentication]`.
   - **Errores**: manejador con formato `{"error": {"code", "message"}}` y el 401 literal `{"code": "auth_failed", "message": "Credenciales inválidas o demasiados intentos. Inténtalo más tarde."}`.
-- [ ] T041 Implementar `backend/apps/iam/api/urls.py` (montado en `/api/v1/`) y `backend/apps/iam/api/views/csrf.py`: `GET /auth/csrf` con `ensure_csrf_cookie` (204), y el decorador `anonymous_state_changing` (= `csrf_protect` + `AllowAny` explícito) para las vistas anónimas
-- [ ] T042 Crear `OneTimeToken` en `backend/apps/iam/models/tokens.py` (data-model):
+- [X] T041 Implementar `backend/apps/iam/api/urls.py` (montado en `/api/v1/`) y `backend/apps/iam/api/views/csrf.py`: `GET /auth/csrf` con `ensure_csrf_cookie` (204), y el decorador `anonymous_state_changing` (= `csrf_protect` + `AllowAny` explícito) para las vistas anónimas
+- [X] T042 Crear `OneTimeToken` en `backend/apps/iam/models/tokens.py` (data-model):
   - Campos `purpose` enum (`account_activation` de 24 h \| `password_reset` de 15 min, FR-046), `verifier` char(64) único, `key_version` varchar(6), `created_at`, `expires_at`, `used_at` nulo e `invalidated_at` nulo.
   - Servicio `backend/apps/iam/services/tokens.py` con `issue(user, purpose)` (invalida los pendientes del mismo usuario y propósito y devuelve el token en claro **solo en memoria**) y `redeem(token, purpose)` (`select_for_update`, `compare_digest`, un solo uso; caducidad desde `TOKEN_TTL = {"account_activation": 24h, "password_reset": 15min}`).
-- [ ] T043 Crear `OutboxMessage` en `backend/apps/iam/models/outbox.py` (data-model), **sin campos de token, código ni cuerpo**:
+- [X] T043 Crear `OutboxMessage` en `backend/apps/iam/models/outbox.py` (data-model), **sin campos de token, código ni cuerpo**:
   - `kind` enum `account_activation` \| `password_reset` \| `mfa_reset_challenge` \| `mfa_reset_notice`.
   - `user` FK, `related_id` uuid nulo, `status` enum `pending` \| `sending` \| `sent` \| `failed`, `attempts` smallint (máximo 5), `next_attempt_at`, `created_at` y `sent_at`.
-- [ ] T044 Implementar el outbox (R9):
+- [X] T044 Implementar el outbox (R9):
   - `backend/apps/iam/services/outbox.py`: `enqueue(kind, user, related_id=None)` y un registro de *handlers* por `kind`, que cada historia completa.
   - `backend/apps/iam/management/commands/iam_deliver_outbox.py`: bucle con `select_for_update(skip_locked=True)`; el *handler* genera el secreto **en el momento de la entrega** y compone el correo en memoria; envío SMTP; espera exponencial; `failed` tras 5 intentos con evento `email_delivery_failed`; opción `--once`.
-- [ ] T045 [P] Crear la base del frontend:
+- [X] T045 [P] Crear la base del frontend:
   - `frontend/src/api/client.js`: `fetch` con `credentials: "same-origin"`, `X-CSRFToken` leído de la cookie `__Host-sf_csrftoken` y análisis del formato de error uniforme.
   - `frontend/src/lib/fragmentToken.js` (R7): lee `location.hash` en el primer render, ejecuta `history.replaceState(null, "", location.pathname + location.search)` y devuelve el token solo para guardarlo en el estado del componente.
   - Enrutador base en `frontend/src/App.jsx`.
@@ -338,23 +338,23 @@ y comprobar el 401 posterior. Corresponde a los escenarios V1–V6 de quickstart
 
 ### Tests for User Story 1 ⚠️ (escribir primero; deben fallar)
 
-- [ ] T046 [P] [US1] Prueba unitaria TS-U02 en `backend/tests/unit/test_password_validators.py`: se rechazan 14 caracteres, 129 caracteres, contraseñas comunes, las que contienen el email o el nombre y `securefin-gateway-2026`; se aceptan 15 caracteres con espacios o Unicode; la normalización NFKC es equivalente en registro y login; no hay reglas de composición
-- [ ] T047 [P] [US1] Contrato TS-C01 (parte US1) en `backend/tests/contract/test_auth_contract.py`: `POST /auth/register` (201 `{"status": "registered"}`), `POST /auth/login` (los tres valores de `status` y 401 genérico), `POST /auth/logout` (204) y `GET /auth/session` (campos de `UserSummary` y `session`); sin campos sensibles; `Cache-Control: no-store`
-- [ ] T048 [P] [US1] Integración TS-I01–I05 en `backend/tests/integration/test_auth_flow.py`: registro, login, logout, `/auth/session` y rotación de la clave de sesión en el login (TS-I05)
-- [ ] T049 [P] [US1] Seguridad en `backend/tests/security/test_us1_auth.py`:
+- [X] T046 [P] [US1] Prueba unitaria TS-U02 en `backend/tests/unit/test_password_validators.py`: se rechazan 14 caracteres, 129 caracteres, contraseñas comunes, las que contienen el email o el nombre y `securefin-gateway-2026`; se aceptan 15 caracteres con espacios o Unicode; la normalización NFKC es equivalente en registro y login; no hay reglas de composición
+- [X] T047 [P] [US1] Contrato TS-C01 (parte US1) en `backend/tests/contract/test_auth_contract.py`: `POST /auth/register` (201 `{"status": "registered"}`), `POST /auth/login` (los tres valores de `status` y 401 genérico), `POST /auth/logout` (204) y `GET /auth/session` (campos de `UserSummary` y `session`); sin campos sensibles; `Cache-Control: no-store`
+- [X] T048 [P] [US1] Integración TS-I01–I05 en `backend/tests/integration/test_auth_flow.py`: registro, login, logout, `/auth/session` y rotación de la clave de sesión en el login (TS-I05)
+- [X] T049 [P] [US1] Seguridad en `backend/tests/security/test_us1_auth.py`:
   - **TS-S04**: cookie `__Host-sf_session` con `HttpOnly`, `Secure`, `SameSite=Strict` y `Path=/`.
   - **Enumeración**: el cuerpo del 401 es idéntico para un usuario inexistente y para una contraseña errónea.
   - **TS-S20**: `role`, `status` o `mfa_*` en el registro dan 400.
   - **TS-S22**: con una contraseña de 129 caracteres, 400 **sin** invocar el hasher (mock).
   - Un Administrador o Auditor sin MFA **nunca** recibe una sesión `full`.
-- [ ] T050 [P] [US1] Aceptación TS-A01 en `backend/tests/acceptance/test_us1_registration_login.py`: una prueba por cada escenario 1–3 y 5–8 de US1 de spec.md. El escenario 4 (gestores de contraseñas, pegar y autocompletar) es comportamiento del navegador y lo cubre T133 (G3)
-- [ ] T131 [P] [US1] Seguridad TS-S27 en `backend/tests/security/test_login_enumeration.py` (NFR-003; corrección G1):
+- [X] T050 [P] [US1] Aceptación TS-A01 en `backend/tests/acceptance/test_us1_registration_login.py`: una prueba por cada escenario 1–3 y 5–8 de US1 de spec.md. El escenario 4 (gestores de contraseñas, pegar y autocompletar) es comportamiento del navegador y lo cubre T133 (G3)
+- [X] T131 [P] [US1] Seguridad TS-S27 en `backend/tests/security/test_login_enumeration.py` (NFR-003; corrección G1):
   - Se comparan 200 logins de usuarios **existentes con contraseña errónea** y 200 de usuarios **inexistentes**, con identificadores distintos para no activar los retrasos por cuenta y la limitación por IP desactivada en el *fixture*.
   - Comportamiento externo equivalente: mismo estado (401), cuerpo idéntico byte a byte, mismo conjunto de nombres de cabecera (salvo `Date`) y ninguno de los dos emite `Set-Cookie: __Host-sf_session`.
   - Diferencia media de tiempo inferior a **100 ms**, con mediana y percentil 95 registrados en el informe.
   - El camino del usuario inexistente ejecuta el hash ficticio con los mismos parámetros (mock espía).
   - La comparación de la recuperación sigue en T109.
-- [ ] T133 [P] [US1] E2E TS-E01 con Playwright en `frontend/tests/e2e/password-fields.spec.js` (FR-005, escenario 4 de US1; correcciones G3 e I1). Comprueba **solo los formularios de US1**: `/register` y `/login`. `/activate` lo prueba T135 (US4) y `/reset`, T136 (US7):
+- [X] T133 [P] [US1] E2E TS-E01 con Playwright en `frontend/tests/e2e/password-fields.spec.js` (FR-005, escenario 4 de US1; correcciones G3 e I1). Comprueba **solo los formularios de US1**: `/register` y `/login`. `/activate` lo prueba T135 (US4) y `/reset`, T136 (US7):
   - **Atributos**: en `/register`, el email tiene `autocomplete="username"` y la contraseña `autocomplete="new-password"`; en `/login`, `username` y `current-password`.
   - **Pegado**: se escribe la contraseña en el portapapeles y se pega con `Control+V`/`Meta+V`; el campo contiene el valor y ningún manejador `paste` lo cancela (`defaultPrevented === false`).
   - **Compatibilidad con gestores**: cada campo está dentro de un `<form>` con botón `submit`, tiene `name`/`id` estables y `type="password"`, no usa `autocomplete="off"` y no tiene `readonly` ni `maxlength` inferior a 128.
@@ -362,26 +362,26 @@ y comprobar el 401 posterior. Corresponde a los escenarios V1–V6 de quickstart
 
 ### Implementation for User Story 1
 
-- [ ] T051 [P] [US1] Implementar `backend/apps/iam/policies/password_validators.py` (R4) y `backend/apps/iam/policies/data/blocklist.txt` (fuente documentada en la cabecera):
+- [X] T051 [P] [US1] Implementar `backend/apps/iam/policies/password_validators.py` (R4) y `backend/apps/iam/policies/data/blocklist.txt` (fuente documentada en la cabecera):
   - `MaximumLengthValidator(128)` y `ServiceTermsBlocklistValidator` (términos "securefin" y "gateway", más el archivo de bloqueo local).
   - Configurar en `backend/config/settings/base.py` el ajuste `AUTH_PASSWORD_VALIDATORS` con `MinimumLengthValidator(15)`, `UserAttributeSimilarityValidator` (`email`, `name`), `CommonPasswordValidator` y los dos validadores propios, **sin** `NumericPasswordValidator`.
   - Función `normalize_password()` con NFKC.
-- [ ] T052 [P] [US1] Implementar `backend/apps/iam/api/serializers/auth.py`:
+- [X] T052 [P] [US1] Implementar `backend/apps/iam/api/serializers/auth.py`:
   - `RegisterSerializer`: solo `email` (254), `name` (1–100, sin caracteres de control) y `password` (máximo 128 **antes** de hashear); cualquier otro campo da 400.
   - `LoginSerializer` con `email` y `password`.
-- [ ] T053 [US1] Implementar `backend/apps/iam/services/registration.py`: `register(email, name, password)` normaliza el email a minúsculas, fija **siempre** `role = client` y `status = active`, aplica los validadores y registra `account_registered`. Ante un identificador duplicado, error neutro (FR-001–FR-006).
-- [ ] T054 [US1] Implementar `backend/apps/iam/services/authentication.py` (FR-007–FR-011, FR-025):
+- [X] T053 [US1] Implementar `backend/apps/iam/services/registration.py`: `register(email, name, password)` normaliza el email a minúsculas, fija **siempre** `role = client` y `status = active`, aplica los validadores y registra `account_registered`. Ante un identificador duplicado, error neutro (FR-001–FR-006).
+- [X] T054 [US1] Implementar `backend/apps/iam/services/authentication.py` (FR-007–FR-011, FR-025):
   - `password_login(request, email, password)`: verificación Argon2id, o un hash ficticio con los mismos parámetros si la cuenta no existe; fallo genérico para inexistente, contraseña incorrecta, `pending_activation` o `deactivated`.
   - Si el rol tiene `ROLE_MFA_REQUIRED` y no hay MFA, se devuelve `mfa_enrollment_required` **sin** `login()` (US3 completa el alta).
   - Si no, `django.contrib.auth.login()` (que rota la clave), `auth_level = "full"`, `authenticated_at = now` y `last_login_at`.
   - Eventos `login_succeeded` y `login_failed`.
-- [ ] T055 [US1] Implementar `backend/apps/iam/api/views/auth.py`: `POST /auth/register`, `POST /auth/login` y `POST /auth/logout` (con `anonymous_state_changing` donde corresponda; el logout borra la fila y registra `logout`), y `GET /auth/session` (`idle_expires_at` y `absolute_expires_at`). Rutas en `backend/apps/iam/api/urls.py`.
-- [ ] T056 [P] [US1] Crear `frontend/src/pages/Register.jsx`, `frontend/src/pages/Login.jsx` y `frontend/src/pages/Home.jsx` (FR-005; corrección U1):
+- [X] T055 [US1] Implementar `backend/apps/iam/api/views/auth.py`: `POST /auth/register`, `POST /auth/login` y `POST /auth/logout` (con `anonymous_state_changing` donde corresponda; el logout borra la fila y registra `logout`), y `GET /auth/session` (`idle_expires_at` y `absolute_expires_at`). Rutas en `backend/apps/iam/api/urls.py`.
+- [X] T056 [P] [US1] Crear `frontend/src/pages/Register.jsx`, `frontend/src/pages/Login.jsx` y `frontend/src/pages/Home.jsx` (FR-005; corrección U1):
   - **`/register`**: un `<form>` con botón `type="submit"`; email con `autocomplete="username"`, `type="email"` y `name`/`id` estables; contraseña con `type="password"` y `autocomplete="new-password"`.
   - **`/login`**: un `<form>` con botón `type="submit"`; email con `autocomplete="username"`; contraseña con `autocomplete="current-password"`.
   - En todos los campos de contraseña: sin manejadores que cancelen `paste`, sin `autocomplete="off"`, sin `readonly` y **ningún `maxlength` inferior a 128**, para mantener la compatibilidad con gestores de contraseñas.
   - Mensajes de validación del servidor y mensaje genérico ante el 401.
-- [ ] T057 [P] [US1] Escribir `docs/security/passwords.md` (Argon2id: parámetros, por qué y metodología de calibración; política NIST, NFKC y lista de bloqueo) y `docs/security/sessions.md` (motor de sesión con verificadores HMAC, cookie `__Host-`, CSRF sin CORS, inactividad, límite absoluto, rotación y revocación) (FR-049)
+- [X] T057 [P] [US1] Escribir `docs/security/passwords.md` (Argon2id: parámetros, por qué y metodología de calibración; política NIST, NFKC y lista de bloqueo) y `docs/security/sessions.md` (motor de sesión con verificadores HMAC, cookie `__Host-`, CSRF sin CORS, inactividad, límite absoluto, rotación y revocación) (FR-049)
 
 **Checkpoint**: US1 funciona de forma independiente (MVP).
 
@@ -623,7 +623,7 @@ Administrador recibe 403; los métodos de escritura dan 405. Escenarios V9 y V17
 ### Tests for User Story 6 ⚠️
 
 - [ ] T103 [P] [US6] Seguridad TS-S18 en `backend/tests/security/test_audit_access.py`: el Administrador y el Cliente sobre `/audit/events` y `/audit/event-types` dan 403; PUT, PATCH y DELETE dan 405; el Auditor sin MFA verificado no obtiene sesión `full`
-- [ ] T104 [P] [US6] Contrato TS-C01 (parte US6) en `backend/tests/contract/test_audit_contract.py`: los filtros `from`, `to`, `event_type`, `outcome`, `actor_id` y `page`, los campos de cada evento y `GET /audit/event-types` con los 31 tipos
+- [ ] T104 [P] [US6] Contrato TS-C01 (parte US6) en `backend/tests/contract/test_audit_contract.py`: los filtros `from`, `to`, `event_type`, `outcome`, `actor_id` y `page`, los campos de cada evento y `GET /audit/event-types` con los 32 tipos
 - [ ] T105 [P] [US6] Aceptación TS-A06 en `backend/tests/acceptance/test_us6_audit.py`: una prueba por cada escenario 1–4 de US6
 
 ### Implementation for User Story 6
@@ -690,7 +690,7 @@ sesiones previas revocadas. Escenario V14 de quickstart.md.
   - **Se conservan**: una fila con `blocked_until` en el futuro (de cualquier versión, incluida una retirada); una fila de la versión activa con un fallo hace 10 min; una fila de una versión aceptada no activa con un fallo reciente.
   - Tras la purga, una cuenta con retraso vigente sigue rechazando intentos sin evaluar credenciales.
   - Se verifican también las demás categorías de T117 (sesiones, tokens, altas `pending`, casos y outbox) y que los recuentos coinciden.
-- [ ] T118 [P] Integración SC-006 en `backend/tests/integration/test_event_catalog_coverage.py`: tras ejecutar los flujos de todas las historias, los 31 tipos de `event_type` aparecen al menos una vez con todos los campos de FR-041
+- [ ] T118 [P] Integración SC-006 en `backend/tests/integration/test_event_catalog_coverage.py`: tras ejecutar los flujos de todas las historias, los 32 tipos de `event_type` aparecen al menos una vez con todos los campos de FR-041
 - [ ] T119 [P] Seguridad TS-S03/TS-S17 en `backend/tests/security/test_secrets_scan.py` (SC-003):
   - Se recogen todos los secretos emitidos durante la sesión de pruebas (contraseñas, tokens, códigos de recuperación y de verificación, secretos TOTP en base32 y valores de cookie).
   - Se buscan en un volcado de la base de datos, en `iam_outboxmessage`, en la `metadata` de `audit_securityevent`, en los logs capturados y en el SQL capturado.
@@ -716,7 +716,7 @@ sesiones previas revocadas. Escenario V14 de quickstart.md.
   - Colección `docs/security/evidence/securefin-iam.postman_collection.json`, con CSRF automático y los escenarios V1–V18 de quickstart.md.
   - Salida de Nmap externo (TS-S10) en `docs/security/evidence/nmap.md`, con los tokens ocultos.
   - **Medición manual de SC-001** (escenario V0; corrección G4): 5 usuarios ficticios cronometran el registro y el primer inicio de sesión desde la página de registro hasta el área personal. Se anotan en `docs/security/evidence/sc-001.md` los tiempos individuales, la media, el criterio (todos por debajo de 2 minutos), la fecha y el equipo.
-- [ ] T126 Evaluar Django REST Framework 3.18.1 según los criterios de R17 (publicada en PyPI, matriz compatible con Django 5.2 y Python 3.13, `pip-compile` sin conflictos y suite completa en verde, incluidas TS-C y TS-SC):
+- [X] T126 Evaluar Django REST Framework 3.18.1 según los criterios de R17 (publicada en PyPI, matriz compatible con Django 5.2 y Python 3.13, `pip-compile` sin conflictos y suite completa en verde, incluidas TS-C y TS-SC):
   - Si los cumple, actualizar `backend/requirements.in` y recompilar `backend/requirements.txt`; si no, fijar la última 3.16.x.
   - Fijar Django en la última 5.2.x publicada.
   - Documentar versiones y decisión en `docs/security/dependencies.md`.

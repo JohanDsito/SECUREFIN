@@ -682,7 +682,7 @@ la primera tarea de implementación):
 |---|---|---|
 | Python | **3.13** (imagen `python:3.13-slim`) | Django 5.2 es compatible con Python 3.10–3.13 |
 | Django | **5.2 LTS, última versión de mantenimiento** (≥ 5.2.17, la última publicada vista, del 4 de agosto de 2026) | Antes de bloquear, comprobar en djangoproject.com si hay una 5.2.x posterior y usarla. Soporte hasta abril de 2028 |
-| Django REST Framework | **3.18.x condicionada; 3.16.x como base segura** | Ver evaluación debajo |
+| Django REST Framework | **3.18.3** (decidido en T126, 2026-11-09) | La 3.16.1 tiene 5 vulnerabilidades conocidas (CVE-2026-114136, -114137, -114138; PYSEC-2026-3827, -3828). Se cumplieron los criterios de adopción; ver `docs/security/dependencies.md` |
 | argon2-cffi, cryptography, pyotp, segno, psycopg[binary] 3, gunicorn | Últimas estables compatibles con Python 3.13 | Se fijan con hashes |
 | PostgreSQL | 17 | Imagen fijada por *digest* |
 | Nginx | estable 1.28 | Imagen fijada por *digest* |

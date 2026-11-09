@@ -69,7 +69,7 @@ CSRF=$(awk '/__Host-sf_csrftoken/ {print $7}' $J)
 | # | Escenario | Esperado | Spec |
 |---|---|---|---|
 | V0 | Registro y primer login cronometrados con 5 usuarios ficticios (SC-001) | Los 5 por debajo de 2 minutos; tiempos anotados en `docs/security/evidence/sc-001.md` | SC-001 |
-| V1 | Registro con contraseña de 15 caracteres o más | `201`; `password` empieza por `$argon2id$v=19$m=65536,t=3,p=1` | US1-1 |
+| V1 | Registro con contraseña de 15 caracteres o más | `201`; `password` empieza por `argon2$argon2id$v=19$m=65536,t=3,p=1$` (prefijo de algoritmo de Django) | US1-1 |
 | V2 | Registro con `"role": "admin"` | `400` | US1-2 |
 | V3 | Contraseña de 14 caracteres / `securefin-gateway-2026` | `400` con la regla incumplida | US1-3 |
 | V4 | POST sin `X-CSRFToken` | `403` | R3 |

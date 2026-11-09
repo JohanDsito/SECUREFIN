@@ -224,7 +224,7 @@ stateDiagram-v2
 | request_id | uuid | Correlación con los logs |
 | metadata | jsonb | Lista permitida por tipo; claves sensibles prohibidas |
 
-**Catálogo de `event_type`** (31 tipos; cubre FR-040):
+**Catálogo de `event_type`** (32 tipos; cubre FR-040):
 
 | Grupo | Eventos |
 |---|---|

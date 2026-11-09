@@ -40,9 +40,9 @@ El enfoque técnico, dentro del monolito modular Django REST Framework, es:
 **Language/Version**: Python 3.13 (preliminar); Node.js 22 LTS solo para compilar el frontend.
 
 **Primary Dependencies**:
-- Backend: Django 5.2 LTS (última versión de mantenimiento, al menos 5.2.17); DRF (3.18.x si supera
-  los criterios de R17, si no la última 3.16.x); argon2-cffi, cryptography, pyotp, segno, psycopg 3,
-  gunicorn.
+- Backend: Django 5.2.19 LTS; DRF 3.18.3 (decidido en T126: la 3.16.1 tiene vulnerabilidades
+  conocidas; ver `docs/security/dependencies.md`); argon2-cffi, cryptography, pyotp, segno,
+  psycopg 3, gunicorn.
 - Frontend: React 19, Vite, react-router.
 - Bloqueo: pip-tools con hashes, `npm ci` e imágenes por *digest* (R17).
 
@@ -364,7 +364,7 @@ actualizar Django):
 | SC-003 | TS-S03, TS-S17, TS-SC14 |
 | SC-004 | TS-S13 |
 | SC-005 | TS-S15, TS-A03 |
-| SC-006 | TS-I16, TS-S17 (31 tipos) |
+| SC-006 | TS-I16, TS-S17 (32 tipos) |
 | SC-007 | TS-I10, TS-I11 |
 | SC-008 | TS-S12, TS-A04 |
 | SC-009 | TS-I13 |

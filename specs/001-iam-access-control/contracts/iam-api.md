@@ -101,7 +101,7 @@ Administrador y Cliente → `403`. PUT, PATCH y DELETE → `405`.
 | Método y ruta | Parámetros | Respuesta |
 |---|---|---|
 | GET `/audit/events` | `from`, `to`, `event_type`, `outcome`, `actor_id`, `page` | `200 {results: [{id, occurred_at, event_type, outcome, actor_id, actor_role, target_type, target_id, source_ip, request_id, metadata}], next, previous}` |
-| GET `/audit/event-types` | — | `200 [31 tipos]` |
+| GET `/audit/event-types` | — | `200 [32 tipos]` |
 
 ## 6. Rutas del frontend que reciben tokens
 
