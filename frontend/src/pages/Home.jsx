@@ -33,6 +33,9 @@ export default function Home() {
       <h1>Hola, {user.name}</h1>
       <p>Rol: {user.role}</p>
       <p>La sesión caduca por inactividad a las {new Date(session.idle_expires_at).toLocaleTimeString()}.</p>
+      <p>
+        <Link to="/profile">Mi perfil</Link> · <Link to="/sessions">Mis sesiones</Link>
+      </p>
       <button type="button" onClick={logout}>Cerrar sesión</button>
     </section>
   );

@@ -131,6 +131,30 @@ def make_user(db):
     return _make
 
 
+@pytest.fixture
+def login_as(api_factory, make_user):
+    """Devuelve (cliente, usuario) con una sesión `full` para cualquier rol.
+
+    Sustituto de prueba hasta US3: todavía no existe `TOTPDevice`, así que Administrador y Auditor no
+    pueden cumplir el MFA. Durante la prueba se da por cumplido el MFA en `IsFullyAuthenticated` y,
+    solo durante el login, se omite el alta obligatoria. Con US3 se sustituye por un alta TOTP real.
+    """
+    patcher = mock.patch("apps.iam.api.permissions.user_mfa_enabled", return_value=True)
+    patcher.start()
+    ips = itertools.count(20)
+
+    def _login(role="client", user=None):
+        user = user or make_user(role=role)
+        client = api_factory(ip=f"203.0.113.{next(ips)}")
+        with mock.patch("apps.iam.services.authentication.mfa_required", return_value=False):
+            response = client.login(user.email)
+        assert response.status_code == 200 and response.json()["status"] == "authenticated"
+        return client, user
+
+    yield _login
+    patcher.stop()
+
+
 class Clock:
     """Reloj controlable: parchea apps.core.clock.now."""
 

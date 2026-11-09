@@ -9,12 +9,13 @@ from apps.iam.policies.password_validators import MAX_PASSWORD_LENGTH
 
 
 class StrictSerializer(serializers.Serializer):
-    """Rechaza cualquier campo no declarado (p. ej. `role`, `status`, `mfa_*`) con 400."""
+    """Rechaza con 400 cualquier campo no declarado o de solo lectura (p. ej. `role`, `status`, `mfa_*`)."""
 
     def to_internal_value(self, data):
         if not isinstance(data, dict):
             raise serializers.ValidationError({"non_field_errors": ["Se esperaba un objeto JSON."]})
-        unknown = sorted(set(data) - set(self.fields))
+        writable = {name for name, field in self.fields.items() if not field.read_only}
+        unknown = sorted(set(data) - writable)
         if unknown:
             raise serializers.ValidationError(
                 {field: ["Campo no permitido."] for field in unknown}

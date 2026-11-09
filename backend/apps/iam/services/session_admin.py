@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import transaction
 
 from apps.audit.services import record_event
+from apps.core import clock
 
 
 def revoke_all(user, except_current=None, actor=None, reason: str = "revocation") -> int:
@@ -34,6 +38,21 @@ def revoke_all(user, except_current=None, actor=None, reason: str = "revocation"
             metadata={"reason": reason, **counts},
         )
     return deleted
+
+
+def active_sessions(user):
+    """Sesiones vigentes del usuario, la más reciente primero (US2).
+
+    Excluye las que ya caducaron por inactividad o por el límite absoluto aunque
+    `iam_purge_expired` aún no las haya borrado.
+    """
+    from apps.iam.models import UserSession
+
+    now = clock.now()
+    idle = timedelta(seconds=settings.SECUREFIN_SESSION["IDLE_TIMEOUT"])
+    return UserSession.objects.filter(
+        user=user, expire_date__gt=now, last_activity_at__gt=now - idle
+    ).order_by("-last_activity_at")
 
 
 def revoke_one(user, public_id) -> bool:

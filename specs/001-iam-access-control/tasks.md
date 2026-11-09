@@ -398,22 +398,22 @@ V18 de quickstart.md.
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T058 [P] [US2] Seguridad TS-S01 en `backend/tests/security/test_authz_matrix.py`: prueba parametrizada **generada desde `ROLE_PERMISSIONS`** sobre todas las rutas registradas y los tres roles; las combinaciones fuera de la matriz dan 401, 403 o 404 según el contrato. Cubre automáticamente las rutas que añaden US3–US7.
-- [ ] T059 [P] [US2] Seguridad TS-S02 en `backend/tests/security/test_bola.py`: el Cliente A sobre `/users/{id_B}/profile`, `/users/{id_B}/sessions`, `DELETE /users/{id_B}/sessions/{public_id_B}` y `/users/{id_B}/security`, más identificadores secuenciales, aleatorios y mal formados → 404 sin revelar existencia y evento `authz_denied`
-- [ ] T060 [P] [US2] Contrato TS-C01 (parte US2) en `backend/tests/contract/test_users_contract.py`: `GET/PATCH /users/{id}/profile` (PATCH solo con `name`; otros campos → 400), `GET /users/{id}/sessions` (campos `public_id`, `created_at`, `last_activity_at`, `ip_address`, `user_agent` y `current`; nunca el verificador), `DELETE /users/{id}/sessions/{public_id}` (204) y `GET /users/{id}/security`
-- [ ] T061 [P] [US2] Aceptación TS-A02 en `backend/tests/acceptance/test_us2_access_control.py`: escenarios 1, 2, 6 y 7 de US2; los escenarios 3–5 se validan con T058 cuando existen las rutas de US4 y US6
+- [X] T058 [P] [US2] Seguridad TS-S01 en `backend/tests/security/test_authz_matrix.py`: prueba parametrizada **generada desde `ROLE_PERMISSIONS`** sobre todas las rutas registradas y los tres roles; las combinaciones fuera de la matriz dan 401, 403 o 404 según el contrato. Cubre automáticamente las rutas que añaden US3–US7.
+- [X] T059 [P] [US2] Seguridad TS-S02 en `backend/tests/security/test_bola.py`: el Cliente A sobre `/users/{id_B}/profile`, `/users/{id_B}/sessions`, `DELETE /users/{id_B}/sessions/{public_id_B}` y `/users/{id_B}/security`, más identificadores secuenciales, aleatorios y mal formados → 404 sin revelar existencia y evento `authz_denied`
+- [X] T060 [P] [US2] Contrato TS-C01 (parte US2) en `backend/tests/contract/test_users_contract.py`: `GET/PATCH /users/{id}/profile` (PATCH solo con `name`; otros campos → 400), `GET /users/{id}/sessions` (campos `public_id`, `created_at`, `last_activity_at`, `ip_address`, `user_agent` y `current`; nunca el verificador), `DELETE /users/{id}/sessions/{public_id}` (204) y `GET /users/{id}/security`
+- [X] T061 [P] [US2] Aceptación TS-A02 en `backend/tests/acceptance/test_us2_access_control.py`: escenarios 1, 2, 6 y 7 de US2; los escenarios 3–5 se validan con T058 cuando existen las rutas de US4 y US6
 
 ### Implementation for User Story 2
 
-- [ ] T062 [P] [US2] Implementar `backend/apps/iam/api/serializers/users.py`: `ProfileSerializer` (solo `name` editable; `role`, `status`, `email` y `mfa_*` dan 400; FR-018), `SessionSerializer` (expone `public_id` y nunca `key_verifier`) y `SecuritySerializer`
-- [ ] T063 [US2] Implementar `backend/apps/iam/api/views/users.py` con `HasRolePermission` e `IsResourceOwner` (consultas siempre filtradas por `request.user`):
+- [X] T062 [P] [US2] Implementar `backend/apps/iam/api/serializers/users.py`: `ProfileSerializer` (solo `name` editable; `role`, `status`, `email` y `mfa_*` dan 400; FR-018), `SessionSerializer` (expone `public_id` y nunca `key_verifier`) y `SecuritySerializer`
+- [X] T063 [US2] Implementar `backend/apps/iam/api/views/users.py` con `HasRolePermission` e `IsResourceOwner` (consultas siempre filtradas por `request.user`):
   - `GET/PATCH /users/{user_id}/profile`.
   - `GET /users/{user_id}/sessions`.
   - `DELETE /users/{user_id}/sessions/{public_id}`: borra la fila; una sesión ajena da 404.
   - `GET /users/{user_id}/security`: `mfa_enabled`, `mfa_required` y `recovery_codes_remaining`.
-- [ ] T064 [US2] Registrar las rutas `/users/{user_id}/…` con el alias `me` en `backend/apps/iam/api/urls.py` y confirmar que T058 y T059 pasan
-- [ ] T065 [P] [US2] Crear `frontend/src/pages/Profile.jsx` y `frontend/src/pages/Sessions.jsx` (listar las propias sesiones y revocar otra sesión)
-- [ ] T066 [P] [US2] Escribir `docs/security/authorization.md`: matriz de permisos, denegar por defecto, BFLA frente a BOLA, respuesta 404 sin revelar existencia y por qué el frontend no es una frontera de confianza (FR-049)
+- [X] T064 [US2] Registrar las rutas `/users/{user_id}/…` con el alias `me` en `backend/apps/iam/api/urls.py` y confirmar que T058 y T059 pasan
+- [X] T065 [P] [US2] Crear `frontend/src/pages/Profile.jsx` y `frontend/src/pages/Sessions.jsx` (listar las propias sesiones y revocar otra sesión)
+- [X] T066 [P] [US2] Escribir `docs/security/authorization.md`: matriz de permisos, denegar por defecto, BFLA frente a BOLA, respuesta 404 sin revelar existencia y por qué el frontend no es una frontera de confianza (FR-049)
 
 **Checkpoint**: US1 y US2 funcionan de forma independiente.
 
