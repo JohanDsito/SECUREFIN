@@ -9,12 +9,25 @@ from django.urls import path
 
 from apps.iam.api.views.auth import LoginView, LogoutView, RegisterView, SessionView
 from apps.iam.api.views.csrf import CsrfView
+from apps.iam.api.views.mfa import (
+    EnrollConfirmView,
+    EnrollSetupView,
+    LoginMfaView,
+    RecoveryCodesRegenerateView,
+    TotpConfirmView,
+    TotpDisableView,
+    TotpSetupView,
+)
 from apps.iam.api.views.users import ProfileView, SecurityView, SessionDetailView, SessionListView
 
 urlpatterns = [
     path("auth/csrf", CsrfView.as_view(), name="auth-csrf"),
     path("auth/register", RegisterView.as_view(), name="auth-register"),
     path("auth/login", LoginView.as_view(), name="auth-login"),
+    # Segundo paso del login (sesión pre_auth; contrato §2)
+    path("auth/login/mfa", LoginMfaView.as_view(), name="auth-login-mfa"),
+    path("auth/login/enroll/setup", EnrollSetupView.as_view(), name="auth-login-enroll-setup"),
+    path("auth/login/enroll/confirm", EnrollConfirmView.as_view(), name="auth-login-enroll-confirm"),
     path("auth/logout", LogoutView.as_view(), name="auth-logout"),
     path("auth/session", SessionView.as_view(), name="auth-session"),
     # Recursos propios (contrato §3): Full + Owner
@@ -26,4 +39,12 @@ urlpatterns = [
         name="user-session-detail",
     ),
     path("users/<str:user_id>/security", SecurityView.as_view(), name="user-security"),
+    path("users/<str:user_id>/mfa/totp/setup", TotpSetupView.as_view(), name="user-mfa-totp-setup"),
+    path("users/<str:user_id>/mfa/totp/confirm", TotpConfirmView.as_view(), name="user-mfa-totp-confirm"),
+    path("users/<str:user_id>/mfa/totp/disable", TotpDisableView.as_view(), name="user-mfa-totp-disable"),
+    path(
+        "users/<str:user_id>/mfa/recovery-codes/regenerate",
+        RecoveryCodesRegenerateView.as_view(),
+        name="user-mfa-recovery-regenerate",
+    ),
 ]

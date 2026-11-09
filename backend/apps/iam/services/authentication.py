@@ -5,8 +5,12 @@
   que el tiempo de respuesta no revela si la cuenta existe (NFR-003).
 - La sesión solo nace tras validar la contraseña (I1); su `created_at` es el origen del límite
   absoluto de 8 h y se hereda en las rotaciones (I3).
-- Un rol con MFA obligatorio nunca recibe una sesión `full` sin MFA verificado (FR-025). En US1 se
-  devuelve `mfa_enrollment_required` sin crear sesión; US3 añade la fase `pre_auth`.
+- Un rol con MFA obligatorio nunca recibe una sesión `full` sin MFA verificado (FR-025).
+- Fase `pre_auth` (T076; R13; U3): tras una contraseña válida, si hay MFA activo (5 min) o el rol lo
+  exige sin tenerlo configurado (alta obligatoria, 10 min), se crea la primera fila de sesión con
+  `_sf_pending_user_id` y **sin** `login()`: `request.user` sigue anónimo y ninguna ruta protegida
+  responde. Al completar el MFA o el alta, `login()` rota la clave y la sesión pasa a `full`
+  heredando el `created_at` inicial (I3).
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 
+from django.conf import settings
 from django.contrib.auth import login
 from django.contrib.auth.hashers import check_password, make_password
 
@@ -71,7 +76,28 @@ def verify_password(email: str, password: str, source_ip: str | None) -> User:
     return user
 
 
-def start_full_session(request, user: User, source_ip: str | None) -> None:
+def start_pre_auth(request, user: User, ttl: int) -> None:
+    """Crea la sesión `pre_auth`: correlaciona al usuario pendiente sin autenticarlo (U3, I1)."""
+    session = request.session
+    session.flush()  # identificador nuevo; no se mezcla con estado previo
+    session[K.LEVEL] = K.PRE_AUTH
+    session[K.PENDING_USER] = str(user.id)
+    session[K.CREATED_AT] = clock.now().isoformat()
+    session[K.PRE_AUTH_TTL] = ttl
+
+
+def pending_user(request) -> User | None:
+    """Usuario pendiente de la sesión `pre_auth` actual, solo si sigue activo."""
+    session = request.session
+    if session.get(K.LEVEL) != K.PRE_AUTH:
+        return None
+    user_id = session.get(K.PENDING_USER)
+    if not user_id:
+        return None
+    return User.objects.filter(pk=user_id, status=Status.ACTIVE).first()
+
+
+def start_full_session(request, user: User, source_ip: str | None, mfa_method: str | None = None) -> None:
     """Crea (o rota) la sesión `full` con origen de caducidad propio o heredado."""
     session = request.session
     now = clock.now()
@@ -96,18 +122,81 @@ def start_full_session(request, user: User, source_ip: str | None) -> None:
         target_type="user",
         target_id=user.id,
         source_ip=source_ip,
-        metadata={"auth_level": K.FULL},
+        metadata={"auth_level": K.FULL, **({"mfa_method": mfa_method} if mfa_method else {})},
     )
 
 
 def password_login(request, email: str, password: str, source_ip: str | None) -> LoginResult:
     user = verify_password(email, password, source_ip)
+    cfg = settings.SECUREFIN_SESSION
     if user_mfa_enabled(user):
+        start_pre_auth(request, user, cfg["PRE_AUTH_TTL"])
         return LoginResult(status="mfa_required", user=user)
     if mfa_required(user.role):
+        start_pre_auth(request, user, cfg["PRE_AUTH_ENROLL_TTL"])
         return LoginResult(status="mfa_enrollment_required", user=user)
     start_full_session(request, user, source_ip)
     return LoginResult(status="authenticated", user=user)
+
+
+def _mfa_failed(user: User, source_ip: str | None, reason: str) -> None:
+    record_event(
+        "login_failed",
+        "failure",
+        actor=user,
+        source_ip=source_ip,
+        metadata={"reason": reason, "stage": "mfa"},
+    )
+    raise AuthenticationFailedError
+
+
+def complete_mfa(request, source_ip: str | None, totp_code: str | None = None,
+                 recovery_code: str | None = None) -> tuple[User, int | None]:
+    """Segundo paso del login: TOTP o código de recuperación (FR-008, FR-026, FR-029).
+
+    Devuelve (usuario, códigos restantes si se usó uno de recuperación). Cualquier fallo es genérico.
+    """
+    from apps.iam.services import mfa, recovery_codes
+
+    user = pending_user(request)
+    if user is None or not user_mfa_enabled(user):
+        raise AuthenticationFailedError
+    remaining = None
+    if totp_code is not None:
+        if not mfa.verify_totp(user, totp_code):
+            _mfa_failed(user, source_ip, "invalid_totp")
+        method = "totp"
+    else:
+        remaining = recovery_codes.consume(user, recovery_code)
+        if remaining is None:
+            _mfa_failed(user, source_ip, "invalid_recovery_code")
+        method = "recovery_code"
+    start_full_session(request, user, source_ip, mfa_method=method)
+    return user, remaining
+
+
+def pending_enrollment_user(request) -> User | None:
+    """Usuario en alta obligatoria: `pre_auth` y sin MFA activo (con MFA activo no se puede volver a
+    dar de alta desde aquí; sería una forma de evitar el segundo factor)."""
+    user = pending_user(request)
+    if user is None or user_mfa_enabled(user) or not mfa_required(user.role):
+        return None
+    return user
+
+
+def complete_enrollment(request, totp_code: str, source_ip: str | None) -> tuple[User, list[str]]:
+    """Alta obligatoria durante el login: confirma el TOTP y pasa a `full` (FR-024, FR-025, FR-028)."""
+    from apps.iam.services import mfa
+
+    user = pending_enrollment_user(request)
+    if user is None:
+        raise AuthenticationFailedError
+    try:
+        codes = mfa.confirm_enrollment(user, totp_code, session=request.session, rotate=False)
+    except mfa.MfaError as exc:
+        raise AuthenticationFailedError from exc
+    start_full_session(request, user, source_ip, mfa_method="enrollment")
+    return user, codes
 
 
 def user_summary(user: User) -> dict:

@@ -41,3 +41,36 @@ def session_cookie_set(response) -> bool:
 def session_cookie_deleted(response) -> bool:
     morsel = response.cookies.get(COOKIE)
     return morsel is not None and morsel.value == ""
+
+
+# --- MFA (US3) --------------------------------------------------------------------------------------
+TOTP_PERIOD = 30
+
+
+def make_totp_device(user, status: str = "active", secret: str | None = None) -> str:
+    """Crea un TOTPDevice cifrado igual que el servicio y devuelve el secreto base32 (solo pruebas)."""
+    import pyotp
+
+    from apps.iam.crypto import aead
+    from apps.iam.models import TOTPDevice
+
+    secret = secret or pyotp.random_base32(32)
+    encrypted = aead.encrypt_totp_secret(user.id, secret)
+    TOTPDevice.objects.create(
+        user=user,
+        status=status,
+        secret_ciphertext=encrypted.ciphertext,
+        nonce=encrypted.nonce,
+        key_version=encrypted.key_version,
+        confirmed_at=clock.now() if status == "active" else None,
+    )
+    return secret
+
+
+def totp_code(secret: str, at=None, steps: int = 0) -> str:
+    """Código TOTP para el instante `at` (por defecto, clock.now()) desplazado `steps` intervalos."""
+    import pyotp
+    from datetime import timedelta
+
+    moment = (at or clock.now()) + timedelta(seconds=steps * TOTP_PERIOD)
+    return pyotp.TOTP(secret).at(moment)

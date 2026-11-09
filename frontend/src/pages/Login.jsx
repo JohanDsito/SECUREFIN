@@ -23,7 +23,8 @@ export default function Login() {
         body: { email: form.get("email"), password: form.get("password") },
       });
       if (result.status === "authenticated") navigate("/");
-      else setMessage("Se requiere el segundo factor (MFA) para continuar.");
+      else if (result.status === "mfa_required") navigate("/login/mfa");
+      else navigate("/login/enroll"); // mfa_enrollment_required
     } catch {
       setMessage(GENERIC);
     } finally {

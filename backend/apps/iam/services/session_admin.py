@@ -40,6 +40,20 @@ def revoke_all(user, except_current=None, actor=None, reason: str = "revocation"
     return deleted
 
 
+def rotate_after_mfa_change(user, session, rotate: bool = True) -> None:
+    """FR-012: al activar, desactivar o reconfigurar el MFA o regenerar los códigos, se revocan las
+    demás sesiones del usuario y se rota la clave de la actual. El `created_at` inicial viaja en los
+    datos de sesión, así que el límite absoluto de 8 h no se reinicia (I3).
+
+    ``rotate=False`` cuando el llamador va a rotar de todos modos (paso de pre_auth a full con login()).
+    """
+    if session is None:
+        return
+    revoke_all(user, except_current=session, reason="mfa_changed")
+    if rotate:
+        session.cycle_key()
+
+
 def active_sessions(user):
     """Sesiones vigentes del usuario, la más reciente primero (US2).
 

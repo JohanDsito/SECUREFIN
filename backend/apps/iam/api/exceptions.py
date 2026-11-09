@@ -14,6 +14,14 @@ class BusinessRuleConflict(exceptions.APIException):
     default_detail = "La operación entra en conflicto con una regla de negocio."
 
 
+class VerificationFailedError(exceptions.APIException):
+    """Reautenticación fallida en una operación sobre el propio MFA (contraseña o código)."""
+
+    status_code = 400
+    default_code = "verification_failed"
+    default_detail = "No se pudo verificar la contraseña o el código."
+
+
 class InvalidTokenError(exceptions.APIException):
     status_code = 400
     default_code = "invalid_token"

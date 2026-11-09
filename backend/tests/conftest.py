@@ -133,26 +133,60 @@ def make_user(db):
 
 @pytest.fixture
 def login_as(api_factory, make_user):
-    """Devuelve (cliente, usuario) con una sesión `full` para cualquier rol.
+    """Devuelve (cliente, usuario) con una sesión `full` obtenida por el flujo real.
 
-    Sustituto de prueba hasta US3: todavía no existe `TOTPDevice`, así que Administrador y Auditor no
-    pueden cumplir el MFA. Durante la prueba se da por cumplido el MFA en `IsFullyAuthenticated` y,
-    solo durante el login, se omite el alta obligatoria. Con US3 se sustituye por un alta TOTP real.
+    Administrador y Auditor (MFA obligatorio) y los Clientes con `mfa=True` reciben un TOTPDevice
+    activo y completan el paso `/auth/login/mfa`. El secreto queda en `user.totp_secret` para que la
+    prueba pueda generar códigos.
     """
-    patcher = mock.patch("apps.iam.api.permissions.user_mfa_enabled", return_value=True)
-    patcher.start()
+    from apps.iam.models import TOTPDevice
+    from apps.iam.policies.matrix import mfa_required
+    from tests.helpers import make_totp_device, totp_code
+
     ips = itertools.count(20)
 
-    def _login(role="client", user=None):
+    def _login(role="client", user=None, mfa=False):
         user = user or make_user(role=role)
+        if (mfa or mfa_required(user.role)) and not getattr(user, "totp_secret", None):
+            user.totp_secret = make_totp_device(user)
         client = api_factory(ip=f"203.0.113.{next(ips)}")
-        with mock.patch("apps.iam.services.authentication.mfa_required", return_value=False):
-            response = client.login(user.email)
+        response = client.login(user.email)
+        if getattr(user, "totp_secret", None):
+            assert response.json() == {"status": "mfa_required"}
+            # Varios logins del mismo usuario en la misma ventana: se libera la antirrepetición.
+            TOTPDevice.objects.filter(user=user, status="active").update(last_used_timestep=None)
+            response = client.post("/auth/login/mfa", {"totp_code": totp_code(user.totp_secret)})
         assert response.status_code == 200 and response.json()["status"] == "authenticated"
         return client, user
 
-    yield _login
-    patcher.stop()
+    return _login
+
+
+_AUDIT_TRUNCATE_TRIGGER = "ALTER TABLE audit_securityevent {} TRIGGER audit_securityevent_no_truncate"
+
+
+@pytest.fixture
+def _restore_audit_trigger(django_db_blocker):
+    yield
+    from django.db import connection
+
+    with django_db_blocker.unblock(), connection.cursor() as cursor:
+        cursor.execute(_AUDIT_TRUNCATE_TRIGGER.format("ENABLE"))
+
+
+@pytest.fixture
+def concurrent_db(_restore_audit_trigger, transactional_db):
+    """Base de datos con transacciones reales para pruebas de concurrencia entre hilos.
+
+    Al terminar, pytest-django vacía las tablas con TRUNCATE y el trigger append-only de la auditoría
+    lo impide (correctamente). Solo en la base de pruebas, y solo durante esa limpieza, se desactiva
+    el trigger de TRUNCATE; `_restore_audit_trigger` lo reactiva justo después del vaciado.
+    """
+    yield
+    from django.db import connection
+
+    with connection.cursor() as cursor:
+        cursor.execute(_AUDIT_TRUNCATE_TRIGGER.format("DISABLE"))
 
 
 class Clock:

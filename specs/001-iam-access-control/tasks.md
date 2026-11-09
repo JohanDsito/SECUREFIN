@@ -430,54 +430,54 @@ accede a nada protegido. Escenarios V10–V12 de quickstart.md.
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T067 [P] [US3] Pruebas unitarias TS-U03/U04 en `backend/tests/unit/test_aead.py`: cifrar y descifrar con AAD `"securefin:totp:v1:" + user.id`; un texto cifrado trasladado a otro usuario falla la autenticación GCM; dos cifrados del mismo secreto usan nonces distintos de 12 bytes
-- [ ] T068 [P] [US3] Integración TS-I09/TS-I10 en `backend/tests/integration/test_mfa.py`:
+- [X] T067 [P] [US3] Pruebas unitarias TS-U03/U04 en `backend/tests/unit/test_aead.py`: cifrar y descifrar con AAD `"securefin:totp:v1:" + user.id`; un texto cifrado trasladado a otro usuario falla la autenticación GCM; dos cifrados del mismo secreto usan nonces distintos de 12 bytes
+- [X] T068 [P] [US3] Integración TS-I09/TS-I10 en `backend/tests/integration/test_mfa.py`:
   - Un código TOTP repetido en su ventana da 401 y se acepta ±1 intervalo.
   - Los códigos de recuperación son de un solo uso; uno de un lote anterior se rechaza.
   - Dos peticiones concurrentes con el mismo código: solo una tiene éxito (`select_for_update`).
   - El alta `pending` caduca a los 10 min.
-- [ ] T069 [P] [US3] Seguridad TS-S15 en `backend/tests/security/test_pre_auth.py` (con los endpoints reales; complementa a SC20 de T134):
+- [X] T069 [P] [US3] Seguridad TS-S15 en `backend/tests/security/test_pre_auth.py` (con los endpoints reales; complementa a SC20 de T134):
   - **Usuario con MFA pendiente**: tras una contraseña válida, la fila `pre_auth` tiene `user_id` del usuario (desde `_sf_pending_user_id`) y `request.user` anónimo.
   - **Sin acceso**: con esa sesión, **todas** las rutas protegidas dan 401, incluidas `/users/me/*`, `/admin/*` y `/audit/*`; solo responden `/auth/login/mfa`, `/auth/login/enroll/*`, `/auth/login/mfa-reset-request` y `/auth/logout`.
   - **Revocación de `pre_auth`**: un cambio de rol, una desactivación o `revoke_all` sobre ese usuario hace que la sesión `pre_auth` dé 401 en `/auth/login/mfa`.
   - **Revocación de `full`**: un `revoke_all` posterior a completar el MFA invalida también la sesión `full`.
   - **Expiración**: `pre_auth` caduca a los 5 min (10 en un alta obligatoria), con reloj simulado.
   - **Rotación**: la clave rota al pasar de `pre_auth` a `full`.
-- [ ] T070 [P] [US3] Contrato TS-C01 (parte US3) en `backend/tests/contract/test_mfa_contract.py`: `/auth/login/mfa`, `/auth/login/enroll/setup`, `/auth/login/enroll/confirm` (10 códigos de 28 caracteres) y `/users/{id}/mfa/totp/{setup,confirm,disable}`, `/users/{id}/mfa/recovery-codes/regenerate`; `Cache-Control: no-store` en las respuestas con secreto o códigos
-- [ ] T071 [P] [US3] Aceptación TS-A03 en `backend/tests/acceptance/test_us3_mfa.py`: una prueba por cada escenario 1–10 de US3
+- [X] T070 [P] [US3] Contrato TS-C01 (parte US3) en `backend/tests/contract/test_mfa_contract.py`: `/auth/login/mfa`, `/auth/login/enroll/setup`, `/auth/login/enroll/confirm` (10 códigos de 28 caracteres) y `/users/{id}/mfa/totp/{setup,confirm,disable}`, `/users/{id}/mfa/recovery-codes/regenerate`; `Cache-Control: no-store` en las respuestas con secreto o códigos
+- [X] T071 [P] [US3] Aceptación TS-A03 en `backend/tests/acceptance/test_us3_mfa.py`: una prueba por cada escenario 1–10 de US3
 
 ### Implementation for User Story 3
 
-- [ ] T072 [P] [US3] Implementar `backend/apps/iam/crypto/aead.py` con `encrypt_totp_secret(user_id, secret)` y `decrypt_totp_secret(user_id, nonce, ciphertext, key_version)`: AES-256-GCM (`cryptography`), nonce aleatorio de 96 bits por operación, AAD `"securefin:totp:v1:" + str(user_id)` y la clave `TOTP_ENCRYPTION_KEYS[version]` (R5)
-- [ ] T073 [P] [US3] Crear `TOTPDevice` y `RecoveryCode` con su migración en `backend/apps/iam/models/mfa.py` (data-model):
+- [X] T072 [P] [US3] Implementar `backend/apps/iam/crypto/aead.py` con `encrypt_totp_secret(user_id, secret)` y `decrypt_totp_secret(user_id, nonce, ciphertext, key_version)`: AES-256-GCM (`cryptography`), nonce aleatorio de 96 bits por operación, AAD `"securefin:totp:v1:" + str(user_id)` y la clave `TOTP_ENCRYPTION_KEYS[version]` (R5)
+- [X] T073 [P] [US3] Crear `TOTPDevice` y `RecoveryCode` con su migración en `backend/apps/iam/models/mfa.py` (data-model):
   - **`TOTPDevice`**: `user` OneToOne; `status` enum `pending` \| `active`; `secret_ciphertext` bytea; `nonce` bytea(12); `key_version` varchar(6); `last_used_timestep` bigint nulo; `created_at` y `confirmed_at` ("un alta `pending` caduca a los 10 minutos").
   - **`RecoveryCode`**: `user` FK; `batch_id` uuid; `verifier` varchar(128); `status` enum `available` \| `used` \| `invalidated`; `created_at`; `used_at`.
-- [ ] T074 [US3] Implementar `backend/apps/iam/services/mfa.py` (FR-024–FR-027, FR-031):
+- [X] T074 [US3] Implementar `backend/apps/iam/services/mfa.py` (FR-024–FR-027, FR-031):
   - `start_enrollment` genera un secreto de 160 bits con `secrets`, lo cifra y crea el dispositivo `pending`; devuelve `otpauth_uri`, `qr_svg_data_uri` (QR con `segno` en `data:image/svg+xml;base64`) y `secret_base32`.
   - `confirm_enrollment` (`pyotp`, SHA-1, 6 dígitos, 30 s, `valid_window=1`) activa el dispositivo y genera los códigos.
   - `verify_totp` acepta solo `timestep > last_used_timestep`.
   - `disable` solo para roles con MFA opcional y exige contraseña y código.
   - `reconfigure` exige contraseña e invalida el secreto y el lote anteriores.
   - Eventos `mfa_enabled`, `mfa_disabled`, `mfa_reconfigured` y `totp_rejected`.
-- [ ] T075 [US3] Implementar `backend/apps/iam/services/recovery_codes.py` (R6, FR-028–FR-030):
+- [X] T075 [US3] Implementar `backend/apps/iam/services/recovery_codes.py` (R6, FR-028–FR-030):
   - `generate_batch(user)`: 10 códigos de `codes.generate_recovery_code()`; verificador Argon2id (`argon2-cffi`, `memory_cost=19456`, `time_cost=2`, `parallelism=1`); invalida el lote anterior; devuelve los códigos en claro solo una vez.
   - `consume(user, raw)`: normaliza, usa `select_for_update` sobre los códigos `available` y los marca `used`; evento `recovery_code_used`.
   - `regenerate(user, password, totp)`: evento `recovery_codes_regenerated`.
-- [ ] T076 [US3] Ampliar `backend/apps/iam/services/authentication.py` con el flujo `pre_auth` (R13):
+- [X] T076 [US3] Ampliar `backend/apps/iam/services/authentication.py` con el flujo `pre_auth` (R13):
   - Tras una contraseña válida, si hay MFA activo → `pre_auth` (5 min, sin `login()`); si es un rol con MFA obligatorio sin MFA → `pre_auth` de alta (10 min). En ambos casos se crea la **primera** fila de sesión con `_sf_pending_user_id = user.id` y `_sf_auth_level = "pre_auth"`; `request.user` no se autentica (U3, I1).
   - Al completar el MFA o el alta, `login()` sustituye `_sf_pending_user_id` por `_auth_user_id` y la nueva fila hereda `created_at` (I3).
   - `complete_mfa(request, totp_code | recovery_code)` y `complete_enrollment` → `login()` (rota la clave), `full` y `authenticated_at`.
   - Las rutas permitidas en `pre_auth` son solo `/auth/login/mfa`, `/auth/login/enroll/*`, `/auth/login/mfa-reset-request` y `/auth/logout`.
-- [ ] T077 [US3] Aplicar FR-012 en `backend/apps/iam/services/mfa.py` y `backend/apps/iam/services/recovery_codes.py`: al activar, desactivar o reconfigurar el MFA, o al regenerar los códigos, `session_admin.revoke_all(user, except_current=request.session)` y `request.session.cycle_key()`, heredando el `created_at` inicial (el límite absoluto no se reinicia)
-- [ ] T078 [US3] Implementar `backend/apps/iam/api/serializers/mfa.py` y `backend/apps/iam/api/views/mfa.py` con `Cache-Control: no-store` en las respuestas con secreto o códigos y sus rutas en `backend/apps/iam/api/urls.py`:
+- [X] T077 [US3] Aplicar FR-012 en `backend/apps/iam/services/mfa.py` y `backend/apps/iam/services/recovery_codes.py`: al activar, desactivar o reconfigurar el MFA, o al regenerar los códigos, `session_admin.revoke_all(user, except_current=request.session)` y `request.session.cycle_key()`, heredando el `created_at` inicial (el límite absoluto no se reinicia)
+- [X] T078 [US3] Implementar `backend/apps/iam/api/serializers/mfa.py` y `backend/apps/iam/api/views/mfa.py` con `Cache-Control: no-store` en las respuestas con secreto o códigos y sus rutas en `backend/apps/iam/api/urls.py`:
   - `POST /auth/login/mfa`, `POST /auth/login/enroll/setup` y `POST /auth/login/enroll/confirm`.
   - `POST /users/{id}/mfa/totp/setup` (`{password}` si ya hay MFA activo), `POST /users/{id}/mfa/totp/confirm` y `POST /users/{id}/mfa/totp/disable` (403 para `admin` y `auditor`).
   - `POST /users/{id}/mfa/recovery-codes/regenerate`.
-- [ ] T079 [P] [US3] Implementar el comando `backend/apps/iam/management/commands/iam_rotate_totp_key.py --to vN`: recifra todos los `TOTPDevice` con la versión `vN` dentro de una transacción e informa del recuento (R8)
-- [ ] T080 [P] [US3] Crear `frontend/src/pages/MfaStep.jsx` (TOTP o código de recuperación), `frontend/src/pages/Enroll.jsx` (QR en `<img src=data:…>` y secreto en texto) y `frontend/src/components/RecoveryCodes.jsx`:
+- [X] T079 [P] [US3] Implementar el comando `backend/apps/iam/management/commands/iam_rotate_totp_key.py --to vN`: recifra todos los `TOTPDevice` con la versión `vN` dentro de una transacción e informa del recuento (R8)
+- [X] T080 [P] [US3] Crear `frontend/src/pages/MfaStep.jsx` (TOTP o código de recuperación), `frontend/src/pages/Enroll.jsx` (QR en `<img src=data:…>` y secreto en texto) y `frontend/src/components/RecoveryCodes.jsx`:
   - Los códigos se muestran una sola vez, con copiar y descarga `.txt` generada en el navegador con `Blob`.
   - Nunca se guardan en el almacenamiento del navegador.
-- [ ] T081 [P] [US3] Escribir `docs/security/mfa.md`: TOTP (parámetros y antirrepetición), AES-256-GCM con AAD y por qué no se usa un hash, códigos de recuperación de 140 bits con Argon2id, `pre_auth` y MFA obligatorio por rol (FR-049)
+- [X] T081 [P] [US3] Escribir `docs/security/mfa.md`: TOTP (parámetros y antirrepetición), AES-256-GCM con AAD y por qué no se usa un hash, códigos de recuperación de 140 bits con Argon2id, `pre_auth` y MFA obligatorio por rol (FR-049)
 
 **Checkpoint**: US1–US3 funcionan de forma independiente.
 

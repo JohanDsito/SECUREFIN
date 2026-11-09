@@ -101,7 +101,7 @@ stateDiagram-v2
 | Campo | Tipo | Reglas |
 |---|---|---|
 | id | uuid | PK |
-| user | OneToOne User | |
+| user | FK User | Como máximo un dispositivo `active` y uno `pending` por usuario, con restricciones únicas condicionales (índices únicos parciales). Así se reconfigura sin perder el MFA vigente; ver docs/security/mfa.md |
 | status | enum | `pending` \| `active` |
 | secret_ciphertext 🔒 | bytea | AES-256-GCM con etiqueta; AAD = `"securefin:totp:v1:" + user.id` |
 | nonce | bytea(12) | Único por cifrado |

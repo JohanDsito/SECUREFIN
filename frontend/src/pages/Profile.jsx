@@ -53,7 +53,10 @@ export default function Profile() {
         <dt>Segundo factor (MFA)</dt>
         <dd>
           {security.mfa_enabled ? "Activo" : "No configurado"}
-          {security.mfa_required && " · obligatorio para tu rol"}
+          {security.mfa_required && " · obligatorio para tu rol"}{" "}
+          <Link to={security.mfa_enabled ? "/mfa/reconfigure" : "/mfa/setup"}>
+            {security.mfa_enabled ? "Reconfigurar" : "Configurar"}
+          </Link>
         </dd>
         {security.mfa_enabled && (
           <>

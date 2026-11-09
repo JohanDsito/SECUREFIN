@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { api } from "../api/client.js";
 
 // Área personal (T056). Si no hay sesión `full`, invita a iniciar sesión.
 export default function Home() {
   const navigate = useNavigate();
+  const remaining = useLocation().state?.recoveryCodesRemaining;
   const [state, setState] = useState({ loading: true, data: null });
 
   useEffect(() => {
@@ -31,6 +32,12 @@ export default function Home() {
   return (
     <section>
       <h1>Hola, {user.name}</h1>
+      {remaining !== undefined && (
+        <p role="status">
+          Has usado un código de recuperación. Te quedan {remaining}. Si perdiste tu dispositivo, reconfigura el MFA
+          desde <Link to="/profile">tu perfil</Link>.
+        </p>
+      )}
       <p>Rol: {user.role}</p>
       <p>La sesión caduca por inactividad a las {new Date(session.idle_expires_at).toLocaleTimeString()}.</p>
       <p>
