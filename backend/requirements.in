@@ -1,0 +1,12 @@
+# Dependencias directas de ejecución (R17). Bloqueadas con hashes en requirements.txt mediante:
+#   pip-compile --generate-hashes --allow-unsafe requirements.in
+Django>=5.2.17,<5.3
+# DRF 3.18.x (T126; R17): 3.16.1 tiene 5 vulnerabilidades (CVE-2026-114136, -114137, -114138,
+# PYSEC-2026-3827, -3828), corregidas en 3.17.2 y 3.18.2. Se fija la última 3.18.x.
+djangorestframework>=3.18.2,<3.19
+argon2-cffi
+cryptography
+pyotp
+segno
+psycopg[binary]>=3.2
+gunicorn
