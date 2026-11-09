@@ -30,7 +30,8 @@ El backend no arranca si falta una clave, si mide menos de 32 bytes o si dos cla
 mkdir -p secrets && chmod 700 secrets
 for k in django_secret_key session_hmac_key_v1 token_hmac_key_v1 throttle_hmac_key_v1 \
          totp_key_v1 db_superuser_password db_owner_password db_app_password; do
-  openssl rand -base64 32 > "secrets/$k"
+  # tr elimina CR/LF: el openssl de Git Bash escribe CRLF y un "\r" final cambiaría la contraseña
+  openssl rand -base64 32 | tr -d '\r\n' > "secrets/$k"
 done
 
 # CA de laboratorio y certificado con SAN para securefin.local y 127.0.0.1
@@ -44,8 +45,8 @@ openssl x509 -req -in secrets/tls.csr -CA secrets/lab_ca.pem -CAkey secrets/lab_
 
 # Credencial ÚNICA de Mailpit (apr1, admitido por Nginx y por Mailpit)
 MP_USER=labmail
-MP_PASS="$(openssl rand -base64 24)"
-printf "%s:%s\n" "$MP_USER" "$(openssl passwd -apr1 "$MP_PASS")" > secrets/mailpit_htpasswd
+MP_PASS="$(openssl rand -hex 18)"
+printf "%s:%s\n" "$MP_USER" "$(openssl passwd -apr1 "$MP_PASS" | tr -d '\r\n')" > secrets/mailpit_htpasswd
 echo "Guarda la contraseña de Mailpit en tu gestor de contraseñas; no se escribe en ningún archivo."
 ```
 

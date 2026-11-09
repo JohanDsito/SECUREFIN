@@ -2,7 +2,7 @@
 # Uso desde la raíz del repositorio:
 #   docker compose -f infra/compose.yaml up -d --build --wait
 #   docker compose -f infra/compose.yaml --profile oneoff run --rm migrate
-# Fijar los digests de las imágenes (`imagen:tag@sha256:...`) al construir por primera vez (R17).
+# Imágenes externas fijadas por etiqueta y digest (R17).
 name: securefin
 
 x-django-runtime: &django-runtime
@@ -51,7 +51,7 @@ services:
       mailpit:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --no-check-certificate -O /dev/null https://localhost/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q --no-check-certificate -O /dev/null https://127.0.0.1/ || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -102,7 +102,7 @@ services:
         condition: service_healthy
 
   db:
-    image: postgres:17
+    image: postgres:17@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f
     environment:
       POSTGRES_DB: securefin
       POSTGRES_PASSWORD_FILE: /run/secrets/db_superuser_password
@@ -121,7 +121,7 @@ services:
       retries: 20
 
   mailpit:
-    image: axllent/mailpit:latest   # fijar versión y digest (R17)
+    image: axllent/mailpit:v1.33.1@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
     environment:
       MP_MAX_MESSAGES: "200"
       MP_MAX_AGE: "24h"

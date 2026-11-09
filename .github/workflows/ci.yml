@@ -58,7 +58,7 @@ jobs:
       TEST_DB_PASSWORD: postgres-ci-ephemeral
     services:
       postgres:
-        image: postgres:17
+        image: postgres:17@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f
         env:
           POSTGRES_PASSWORD: postgres-ci-ephemeral
         ports: ["5432:5432"]
@@ -110,10 +110,14 @@ jobs:
           echo "MAILPIT_API_PASSWORD=$MP_PASS" >> "$GITHUB_ENV"
           echo "NODE_EXTRA_CA_CERTS=$PWD/secrets/lab_ca.pem" >> "$GITHUB_ENV"
           echo "127.0.0.1 securefin.local" | sudo tee -a /etc/hosts >/dev/null
-      - name: Levantar el stack y esperar healthchecks
-        run: docker compose -f infra/compose.yaml up -d --build --wait
+      # Orden: base de datos → migraciones → resto. El mailer consulta el outbox al arrancar y
+      # fallaría (y --wait no terminaría) si el esquema aún no existe.
+      - name: Base de datos
+        run: docker compose -f infra/compose.yaml up -d --build --wait db
       - name: Migraciones (único uso de securefin_owner)
         run: docker compose -f infra/compose.yaml --profile oneoff run --rm migrate
+      - name: Resto del stack y espera de healthchecks
+        run: docker compose -f infra/compose.yaml up -d --build --wait
       - name: Pruebas del stack (marcador stack)
         run: |
           docker compose -f infra/compose.yaml run --rm \

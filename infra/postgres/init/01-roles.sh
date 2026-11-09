@@ -3,8 +3,10 @@
 # Lee las contraseñas de los secretos montados; nunca las escribe en logs.
 set -eu
 
-OWNER_PASSWORD="$(cat /run/secrets/db_owner_password)"
-APP_PASSWORD="$(cat /run/secrets/db_app_password)"
+# Se eliminan CR/LF finales igual que hace Django al leer DB_PASSWORD_FILE (.strip()): un secreto
+# generado en Windows (CRLF) produciría contraseñas distintas en PostgreSQL y en la aplicación.
+OWNER_PASSWORD="$(tr -d '\r\n' < /run/secrets/db_owner_password)"
+APP_PASSWORD="$(tr -d '\r\n' < /run/secrets/db_app_password)"
 DB_NAME="${POSTGRES_DB:-securefin}"
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$DB_NAME" \

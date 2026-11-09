@@ -6,14 +6,18 @@ antes de cargar la configuración base. Nunca se usan secretos reales ni version
 
 from __future__ import annotations
 
+import atexit
 import base64
 import os
 import secrets
+import shutil
 import tempfile
 from pathlib import Path
 
 if not os.environ.get("SECUREFIN_SECRETS_DIR"):
     _secrets = Path(tempfile.mkdtemp(prefix="securefin-test-secrets-"))
+    # Las claves efímeras se borran al terminar el proceso: las pruebas no dejan secretos en disco.
+    atexit.register(shutil.rmtree, _secrets, True)
     for _name in (
         "django_secret_key",
         "session_hmac_key_v1",
