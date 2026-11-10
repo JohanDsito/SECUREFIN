@@ -39,6 +39,7 @@ from apps.iam.models import (
 from apps.iam.services import admin_users, outbox, recovery_codes
 from tests.conftest import STRONG_PASSWORD
 from tests.helpers import deliver_challenge_code, fresh_totp, make_totp_device, requested_case
+from tests.security.routes import iter_api_routes
 
 pytestmark = pytest.mark.acceptance
 
@@ -247,16 +248,13 @@ def test_us4_8_console_bootstrap_first_admin(db):
     User.objects.filter(role=Role.ADMIN).delete()
 
     out = io.StringIO()
-    call_command(
-        "iam_bootstrap_admin",
-        email="bootstrap-admin@lab.securefin.local",
-        name="Bootstrap Admin",
-        stdout=out,
-    )
+    call_command("iam_bootstrap_admin", email="bootstrap-admin@lab.securefin.local", name="Bootstrap Admin", stdout=out)
 
     admin = User.objects.get(email="bootstrap-admin@lab.securefin.local")
     assert admin.role == Role.ADMIN
     assert admin.status == Status.PENDING_ACTIVATION
+    assert not admin.has_usable_password()  # sin credenciales predeterminadas
+    assert OutboxMessage.objects.filter(user=admin, kind="account_activation").exists()
     assert SecurityEvent.objects.filter(event_type="bootstrap_admin_executed").exists()
 
 
@@ -265,6 +263,7 @@ def test_us4_9_console_break_glass_last_admin(make_user):
     User.objects.filter(role=Role.ADMIN).delete()
     admin = make_user(role=Role.ADMIN, status=Status.ACTIVE)
     make_totp_device(admin)
+    old_hash = admin.password
 
     out = io.StringIO()
     with mock.patch("builtins.input", return_value="yes"):
@@ -275,4 +274,9 @@ def test_us4_9_console_break_glass_last_admin(make_user):
             stdout=out,
         )
 
+    admin.refresh_from_db()
+    assert admin.password == old_hash  # mismas garantías que FR-035
+    assert not TOTPDevice.objects.filter(user=admin).exists()
     assert SecurityEvent.objects.filter(event_type="break_glass_executed").exists()
+    # Sin interfaz web ni de API para este procedimiento
+    assert not [p for p, _ in iter_api_routes() if "break" in p or "bootstrap" in p]

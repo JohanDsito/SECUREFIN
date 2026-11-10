@@ -503,7 +503,7 @@ y que un no administrador no puede hacerlo. Escenarios V3, V10, V15 y V16 de qui
   - una solicitud sin `pre_auth` (401) y la cuarta solicitud en 24 h (429).
 
   Además comprueba que la contraseña no cambia y que la respuesta nunca contiene el secreto ni los códigos.
-- [ ] T083 [P] [US4] Integración TS-I14/TS-I17 en `backend/tests/integration/test_admin_and_console.py`:
+- [X] T083 [P] [US4] Integración TS-I14/TS-I17 en `backend/tests/integration/test_admin_and_console.py`:
   - `iam_bootstrap_admin` falla si ya hay un Administrador y no imprime tokens.
   - `iam_break_glass` falla si existe otro Administrador activo con MFA y registra `break_glass_executed` con el usuario del sistema operativo.
   - Con un fallo simulado de `record_event`, el cambio de rol y la desactivación se revierten (FR-044).
@@ -522,7 +522,7 @@ y que un no administrador no puede hacerlo. Escenarios V3, V10, V15 y V16 de qui
   - sin `autocomplete="off"` ni `readonly` y ningún `maxlength` inferior a 128;
   - al cargar, `location.hash` queda vacío **tras `history.replaceState`**, antes de enviar;
   - el envío consume el token y activa la cuenta (204); un segundo uso del mismo token falla.
-- [ ] T085 [P] [US4] Aceptación TS-A04 en `backend/tests/acceptance/test_us4_admin.py`: una prueba por cada escenario 1–9 de US4
+- [X] T085 [P] [US4] Aceptación TS-A04 en `backend/tests/acceptance/test_us4_admin.py`: una prueba por cada escenario 1–9 de US4
 
 ### Implementation for User Story 4
 
@@ -549,14 +549,19 @@ y que un no administrador no puede hacerlo. Escenarios V3, V10, V15 y V16 de qui
   - `GET /admin/users`, `POST /admin/users`, `POST /admin/users/{id}/activation/resend`, `PATCH /admin/users/{id}/role`, `POST /admin/users/{id}/deactivate` y `/reactivate`.
   - `GET /admin/mfa-resets?status=requested`, `POST /admin/mfa-resets/{id}/open`, `/authorize` y `/cancel`.
   - `POST /auth/login/mfa-reset-request` (`pre_auth`).
-- [ ] T091 [P] [US4] Implementar el comando `backend/apps/iam/management/commands/iam_bootstrap_admin.py --email --name`: solo si no existe ningún Administrador; crea la cuenta en `pending_activation` y encola la activación; sin contraseñas por argumentos ni tokens impresos; evento `bootstrap_admin_executed`; código de salida distinto de 0 si ya hay un Administrador (FR-022)
-- [ ] T092 [P] [US4] Implementar el comando `backend/apps/iam/management/commands/iam_break_glass.py --email --reason` (FR-023):
+- [X] T091 [P] [US4] Implementar el comando `backend/apps/iam/management/commands/iam_bootstrap_admin.py --email --name`: solo si no existe ningún Administrador; crea la cuenta en `pending_activation` y encola la activación; sin contraseñas por argumentos ni tokens impresos; evento `bootstrap_admin_executed`; código de salida distinto de 0 si ya hay un Administrador (FR-022)
+- [X] T092 [P] [US4] Implementar el comando `backend/apps/iam/management/commands/iam_break_glass.py --email --reason` (FR-023):
   - Precondición: no existe otro Administrador activo con MFA.
   - Pide confirmación interactiva.
-  - Efectos de FR-033 y `tokens.issue("password_reset")` encolado vía outbox.
+  - Efectos de FR-033 y `tokens.issue("password_reset")` encolado vía outbox. **Diferido a T141**
+    (decisión del 2026-11-10): sin *handler* de `password_reset` hasta US7, break-glass no encola ese
+    correo y solo recupera el acceso del MFA.
   - Evento `break_glass_executed` con el usuario del sistema operativo; sin tokens impresos.
+  - Sin entrada interactiva (sin TTY o entrada cerrada) falla con `CommandError` y sin cambios.
 - [ ] T093 [P] [US4] Crear `frontend/src/pages/Activate.jsx` (usa `fragmentToken.js`, envía a `/auth/activate` y descarta el token). Su formulario es un `<form>` con botón `type="submit"` y un campo de contraseña con `type="password"`, `autocomplete="new-password"` y `name`/`id` estables; permite pegar (sin cancelar `paste`), no usa `autocomplete="off"` ni `readonly` y no tiene ningún `maxlength` inferior a 128 (U1). Crear también `frontend/src/pages/admin/Users.jsx`, `frontend/src/pages/admin/MfaResets.jsx` (abrir, autorizar con el código y el TOTP del Administrador, cancelar) y el botón "Perdí mi dispositivo y mis códigos" en `frontend/src/pages/MfaStep.jsx`
 - [ ] T094 [P] [US4] Escribir `docs/security/admin-and-mfa-reset.md` (procedimiento de verificación de identidad de R11 paso a paso, autorización reforzada y garantías antiabuso) y `docs/security/console-procedures.md` (bootstrap, break-glass, rotación de claves y su ejecución solo en el entorno controlado) (FR-049)
+- [ ] T140 [US4] **Antes de producción**: diseñar e implementar un procedimiento seguro de recuperación del primer Administrador cuando la cuenta de bootstrap sigue en `pending_activation` y su enlace caducó o se perdió (hoy no hay vía: el bootstrap exige que no exista ningún Administrador, break-glass exige una cuenta activa y el reenvío de la API exige otro Administrador). Requiere actualizar antes el contrato §7 y FR-022/FR-023; no reutilizar break-glass sin esa modificación (hallazgo H1 de la revisión de T091/T092)
+- [ ] T141 [US7] Tras T113 (*handler* `password_reset` funcional y probado), reincorporar en `iam_break_glass` el encolado de `password_reset` previsto en el contrato §7 y T092, con una prueba que entregue el correo con `iam_deliver_outbox` y complete `/auth/password-reset/confirm` (hallazgo H3)
 
 **Checkpoint**: US1–US4 funcionan de forma independiente.
 
