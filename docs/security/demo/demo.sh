@@ -126,14 +126,18 @@ dos() {
 }
 
 fuerzabruta() {
-  title "Semana 10 — Fuerza bruta contra el login (límite de la aplicación: 20/min por IP)"
+  title "Semana 10 — Fuerza bruta contra una cuenta (por cuenta: retrasos desde el 5.º fallo; por IP: 20/min)"
+  local victim="victima-$(date +%s)@lab.securefin.local"   # cuenta distinta en cada ejecución
   for i in $(seq 1 23); do
-    code=$(post /auth/login "{\"email\":\"victima@lab.securefin.local\",\"password\":\"intento-$i\"}" | head -1 | cut -c1-3)
+    code=$(post /auth/login "{\"email\":\"$victim\",\"password\":\"intento-$i\"}" | head -1 | cut -c1-3)
     ra=$(grep -i '^Retry-After' /tmp/sf-demo.head | tr -d '\r' | awk '{print $2}')
     printf 'intento %2d → %s%s\n' "$i" "$code" "${ra:+  Retry-After: ${ra}s}"
     sleep 0.3
   done
-  note "Si ves 429 antes del 21: ya hubo intentos en el último minuto desde tu IP"
+  echo "Qué pasó por dentro (auditoría del último minuto; las respuestas 401 son idénticas a propósito):"
+  psql_ro "SELECT '  login_failed reason=' || coalesce(metadata->>'reason','-') || ' → ' || count(*) FROM audit_securityevent WHERE event_type='login_failed' AND occurred_at > now() - interval '1 minute' GROUP BY metadata->>'reason';"
+  psql_ro "SELECT '  throttle_account_delay → ' || count(*) || ' (retraso aplicado: ' || coalesce(max((metadata->>'delay_seconds')::int),0) || ' s)' FROM audit_securityevent WHERE event_type='throttle_account_delay' AND occurred_at > now() - interval '1 minute';"
+  note "invalid_credentials = contraseña evaluada (máx. 5); throttled = rechazado SIN evaluar; 429 = límite por IP"
 }
 
 auditoria() {

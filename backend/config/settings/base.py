@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.audit",
     "apps.iam",
+    "apps.finance",
 ]
 
 MIDDLEWARE = [

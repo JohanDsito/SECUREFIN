@@ -31,10 +31,15 @@ EVENT_TYPES = [
     "throttle_account_delay", "throttle_ip_limited", "credential_stuffing_suspected",
     # Autorización
     "authz_denied",
+    # Operaciones financieras ficticias
+    "finance_account_opened", "finance_account_welcome_credited", "finance_transfer_created",
+    "finance_transfer_completed", "finance_transfer_rejected", "finance_approval_decided",
+    "finance_limit_changed", "finance_risk_alert", "finance_card_created",
+    "finance_card_status_changed",
     # Consola
     "bootstrap_admin_executed", "break_glass_executed",
 ]
-assert len(EVENT_TYPES) == len(set(EVENT_TYPES)) == 32, "El catálogo de data-model.md tiene 32 tipos"
+assert len(EVENT_TYPES) == len(set(EVENT_TYPES)) == 42, "El catálogo de eventos debe ser único"
 
 
 class Outcome(models.TextChoices):

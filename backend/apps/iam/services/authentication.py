@@ -27,6 +27,7 @@ from apps.core import clock
 from apps.iam.models import Status, User
 from apps.iam.policies.matrix import mfa_required
 from apps.iam.policies.password_validators import normalize_password
+from apps.iam.services import throttling
 from apps.iam.services.mfa_state import user_mfa_enabled
 from apps.iam.sessions import keys as K
 
@@ -61,17 +62,37 @@ def _fail(source_ip: str | None, user: User | None = None) -> None:
     raise AuthenticationFailedError
 
 
+def _throttled(source_ip: str | None, stage: str, user: User | None = None) -> None:
+    """Intento durante un retraso por cuenta (FR-036): se rechaza SIN evaluar credenciales, con la
+    misma respuesta genérica que un fallo normal (no revela el retraso ni si la cuenta existe)."""
+    record_event(
+        "login_failed",
+        "failure",
+        actor_id=getattr(user, "id", None),
+        actor_role=getattr(user, "role", None),
+        source_ip=source_ip,
+        metadata={"reason": "throttled", "stage": stage},
+    )
+    raise AuthenticationFailedError
+
+
 def verify_password(email: str, password: str, source_ip: str | None) -> User:
-    """Valida identificador y contraseña. Lanza AuthenticationFailedError (genérico)."""
+    """Valida identificador y contraseña. Lanza AuthenticationFailedError (genérico).
+
+    Si el identificador está en periodo de retraso, rechaza antes de tocar el hasher. Cada fallo
+    (cuenta inexistente, contraseña errónea o cuenta no activa) cuenta para el retraso (T100).
+    """
     email = (email or "").strip().lower()
+    if throttling.check(email) > 0:
+        _throttled(source_ip, "password")
     password = normalize_password(password)
     user = User.objects.filter(email=email).first()
     if user is None:
         check_password(password, _dummy_hash())
+        throttling.register_failure(email, source_ip)
         _fail(source_ip)
-    if not user.check_password(password):
-        _fail(source_ip, user)
-    if user.status != Status.ACTIVE:
+    if not user.check_password(password) or user.status != Status.ACTIVE:
+        throttling.register_failure(email, source_ip)
         _fail(source_ip, user)
     return user
 
@@ -115,6 +136,9 @@ def start_full_session(request, user: User, source_ip: str | None, mfa_method: s
     session.pop(K.PRE_AUTH_TTL, None)
     user.last_login_at = now
     user.save(update_fields=["last_login_at"])
+    # Solo una autenticación COMPLETA reinicia el contador: con MFA, la contraseña correcta no basta
+    # (si no, quien la conoce alternaría "contraseña bien → TOTP al azar" sin llegar nunca al retraso).
+    throttling.register_success(user.email)
     record_event(
         "login_succeeded",
         "success",
@@ -161,14 +185,18 @@ def complete_mfa(request, source_ip: str | None, totp_code: str | None = None,
     user = pending_user(request)
     if user is None or not user_mfa_enabled(user):
         raise AuthenticationFailedError
+    if throttling.check(user.email) > 0:  # antes de descifrar el TOTP o de Argon2id del código
+        _throttled(source_ip, "mfa", user)
     remaining = None
     if totp_code is not None:
         if not mfa.verify_totp(user, totp_code):
+            throttling.register_failure(user.email, source_ip)
             _mfa_failed(user, source_ip, "invalid_totp")
         method = "totp"
     else:
         remaining = recovery_codes.consume(user, recovery_code)
         if remaining is None:
+            throttling.register_failure(user.email, source_ip)
             _mfa_failed(user, source_ip, "invalid_recovery_code")
         method = "recovery_code"
     start_full_session(request, user, source_ip, mfa_method=method)

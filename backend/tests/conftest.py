@@ -163,30 +163,51 @@ def login_as(api_factory, make_user):
 
 
 _AUDIT_TRUNCATE_TRIGGER = "ALTER TABLE audit_securityevent {} TRIGGER audit_securityevent_no_truncate"
+_FINANCE_LEDGER_TRUNCATE_TRIGGER = (
+    "ALTER TABLE finance_ledgerentry {} TRIGGER finance_ledgerentry_no_truncate"
+)
 
 
-@pytest.fixture
-def _restore_audit_trigger(django_db_blocker):
-    yield
+@pytest.fixture(autouse=True)
+def _restore_audit_trigger(request, django_db_blocker):
+    database_fixtures = {"_django_db_helper", "db", "transactional_db", "live_server"}
+    uses_database = request.node.get_closest_marker("django_db") or database_fixtures.intersection(
+        request.fixturenames
+    )
+    if not uses_database:
+        return
+
+    request.getfixturevalue("django_db_setup")
     from django.db import connection
 
-    with django_db_blocker.unblock(), connection.cursor() as cursor:
-        cursor.execute(_AUDIT_TRUNCATE_TRIGGER.format("ENABLE"))
+    if connection.vendor == "postgresql":
+        with django_db_blocker.unblock(), connection.cursor() as cursor:
+            cursor.execute(_AUDIT_TRUNCATE_TRIGGER.format("ENABLE"))
+            cursor.execute(_FINANCE_LEDGER_TRUNCATE_TRIGGER.format("ENABLE"))
 
 
 @pytest.fixture
 def concurrent_db(_restore_audit_trigger, transactional_db):
     """Base de datos con transacciones reales para pruebas de concurrencia entre hilos.
 
-    Al terminar, pytest-django vacía las tablas con TRUNCATE y el trigger append-only de la auditoría
-    lo impide (correctamente). Solo en la base de pruebas, y solo durante esa limpieza, se desactiva
-    el trigger de TRUNCATE; `_restore_audit_trigger` lo reactiva justo después del vaciado.
+    pytest-django vacía las tablas con TRUNCATE; los triggers append-only se desactivan solo en la
+    base de pruebas durante esa limpieza y se reactivan al preparar la siguiente prueba con BD.
     """
     yield
     from django.db import connection
 
     with connection.cursor() as cursor:
         cursor.execute(_AUDIT_TRUNCATE_TRIGGER.format("DISABLE"))
+        cursor.execute(_FINANCE_LEDGER_TRUNCATE_TRIGGER.format("DISABLE"))
+
+
+def pytest_sessionfinish(session, exitstatus):
+    from django.db import connection
+
+    if connection.vendor == "postgresql" and str(connection.settings_dict["NAME"]).startswith("test_"):
+        with connection.cursor() as cursor:
+            cursor.execute(_AUDIT_TRUNCATE_TRIGGER.format("ENABLE"))
+            cursor.execute(_FINANCE_LEDGER_TRUNCATE_TRIGGER.format("ENABLE"))
 
 
 class Clock:

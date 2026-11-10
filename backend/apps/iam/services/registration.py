@@ -6,6 +6,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.db import IntegrityError, transaction
 
 from apps.audit.services import record_event
+from apps.finance.services.accounts import ensure_welcome_account
 from apps.iam.models import Role, Status, User
 from apps.iam.policies.password_validators import normalize_password
 
@@ -26,6 +27,7 @@ def register(email: str, name: str, password: str, source_ip: str | None = None)
     try:
         with transaction.atomic():
             user.save()
+            ensure_welcome_account(user)
             record_event("account_registered", "success", actor=user, target_type="user",
                          target_id=user.id, source_ip=source_ip)
     except IntegrityError as exc:  # carrera con otro registro simultáneo

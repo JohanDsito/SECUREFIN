@@ -57,6 +57,7 @@ Internet ──► [edge_net]  Nginx (TLS 1.2/1.3, cabeceras, rate limit 429, si
 | 9 | DoS / inundación HTTP capa 7 | Ataque con **Apache Benchmark**: el servicio sigue respondiendo a usuarios legítimos | — | **E5** | — |
 | 10 | Rate limiting (Nginx) | `limit_req` por IP en tres zonas (auth 10 r/s, api 30 r/s, web 50 r/s), `limit_conn` 20, respuesta **429** | `infra/nginx/nginx.conf` | **E5** | — |
 | 10 | Rate limiting (aplicación) | Throttles por IP y ámbito: login 20/min, MFA 10/min, registro 5/h, activación 10/h, reinicio MFA 3/día; 429 + `Retry-After` + evento | `backend/apps/iam/api/throttles.py` | **E6** | `tests/security/test_ip_rate_limits.py` |
+| 10 | Fuerza bruta distribuida (por cuenta) | Retrasos progresivos por identificador desde el 5.º fallo (30 s → 900 s de tope), sin bloqueo permanente; se rechaza sin evaluar credenciales; igual para cuentas inexistentes; alerta de relleno de credenciales (10 identificadores en 15 min desde una IP) | `backend/apps/iam/services/throttling.py`, `docs/security/throttling.md` | — | `tests/security/test_bruteforce.py`, `tests/integration/test_throttling.py`, `tests/acceptance/test_us5_bruteforce.py` |
 | 10 | Server hardening | Ver semana 5 | | E1, E8 | |
 
 ## Evidencias (`evidence/`)
@@ -80,7 +81,7 @@ cookies se muestran como `<oculto>` y las credenciales usadas son ficticias.
 
 | Riesgo | Estado | Plan |
 |---|---|---|
-| Retrasos progresivos **por cuenta** ante fuerza bruta distribuida (muchas IPs) | Pendiente (US5: T095–T100) | El límite por IP (T101) y el de Nginx ya frenan ataques desde una IP |
+| NAT compartida: usuarios legítimos tras una misma IP comparten el límite por IP | Aceptado (laboratorio) | Umbrales holgados; el límite por cuenta no se ve afectado (ver `throttling.md`) |
 | 47 CVE HIGH de Debian 13 en la imagen del backend sin parche publicado | Aceptado y vigilado | Trivy en el CI; valorar imagen base mínima (distroless) |
 | Recuperación de contraseña por correo | Pendiente (US7) | Break-glass recupera hoy solo el MFA del último administrador (T141) |
 | Recuperación del primer administrador si no activa su cuenta | Pendiente antes de producción | T140 |

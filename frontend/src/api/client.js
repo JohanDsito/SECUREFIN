@@ -24,8 +24,8 @@ async function ensureCsrf() {
   return readCookie(CSRF_COOKIE);
 }
 
-export async function api(path, { method = "GET", body } = {}) {
-  const headers = { Accept: "application/json" };
+export async function api(path, { method = "GET", body, headers: requestHeaders = {} } = {}) {
+  const headers = { Accept: "application/json", ...requestHeaders };
   if (method !== "GET") {
     headers["Content-Type"] = "application/json";
     headers["X-CSRFToken"] = await ensureCsrf();

@@ -14,7 +14,21 @@ from typing import Any
 from apps.audit.models import EVENT_TYPES, SecurityEvent
 from apps.core.middleware import current_request_id
 
-FORBIDDEN_KEY_PARTS = ("password", "token", "secret", "code", "otp", "session_key", "cookie", "hash")
+FORBIDDEN_KEY_PARTS = (
+    "password",
+    "token",
+    "secret",
+    "code",
+    "otp",
+    "session_key",
+    "cookie",
+    "hash",
+    "pan",
+    "cvv",
+    "pin",
+    "credential",
+    "account_number",
+)
 
 _COMMON = {"reason", "auth_level", "scope", "role", "channel", "count", "pre_auth", "full"}
 METADATA_ALLOWLIST: dict[str, set[str]] = {
@@ -34,6 +48,32 @@ METADATA_ALLOWLIST: dict[str, set[str]] = {
     "email_delivery_failed": {"kind", "attempts"},
     "break_glass_executed": {"os_user", "reason"},
     "bootstrap_admin_executed": {"os_user"},
+    "finance_account_opened": {"account_id", "currency", "account_type"},
+    "finance_account_welcome_credited": {
+        "account_id",
+        "amount_minor",
+        "currency",
+        "correlation_id",
+    },
+    "finance_transfer_created": {
+        "transaction_id",
+        "amount_minor",
+        "currency",
+        "status",
+        "correlation_id",
+    },
+    "finance_transfer_completed": {
+        "transaction_id",
+        "amount_minor",
+        "currency",
+        "correlation_id",
+    },
+    "finance_transfer_rejected": {"transaction_id", "reason"},
+    "finance_approval_decided": {"transaction_id", "decision", "reason"},
+    "finance_limit_changed": {"limit_id", "scope", "currency", "reason"},
+    "finance_risk_alert": {"transaction_id", "rule", "severity"},
+    "finance_card_created": {"card_id"},
+    "finance_card_status_changed": {"card_id", "status", "reason"},
 }
 
 

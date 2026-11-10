@@ -171,9 +171,15 @@ Mientras corre, **recarga https://securefin.local en el navegador**: sigue carga
 bash docs/security/demo/demo.sh fuerzabruta
 ```
 
-- **Se verá**: intentos 1–20 → **401**; desde el 21 → **429 con `Retry-After`**.
-- **Mostrar**: `backend/apps/iam/api/throttles.py` (login 20/min, MFA 10/min…) y los eventos
-  `throttle_ip_limited` con `demo.sh auditoria`.
+- **Se verá**: intentos 1–20 → **401** (idénticos a propósito) y desde el 21 → **429 con
+  `Retry-After`**. El resumen final de auditoría muestra lo que no se ve desde fuera: solo **5**
+  contraseñas se evaluaron (`invalid_credentials`); las siguientes se rechazaron **sin evaluarlas**
+  (`throttled`) porque la cuenta entró en retraso de 30 s.
+- **Mostrar**: `backend/apps/iam/services/throttling.py` (30 s → 900 s de tope, sin bloqueo
+  permanente) y `backend/apps/iam/api/throttles.py` (login 20/min por IP).
+- **Explicar**: dos capas. Por IP frena a un atacante; **por cuenta** frena a una botnet que ataca la
+  misma cuenta desde muchas IPs. Por qué no bloqueo rígido: un atacante podría dejar a la víctima sin
+  acceso (ver `docs/security/throttling.md`).
 - **Ojo**: espera 1 minuto después de la demo de SQLi (comparten el contador de login de tu IP).
 
 ### 10. DevSecOps — Semana 7 · 2 min
@@ -203,8 +209,8 @@ bash docs/security/demo/demo.sh trivy
 
 ## Riesgos abiertos (para responder con honestidad)
 
-- Limitación **por cuenta** con retrasos progresivos (US5, T095–T100): pendiente. Hoy se limita por
-  IP (Nginx y Django).
+- Límite por IP y NAT compartida: usuarios detrás de la misma IP pública comparten el límite por IP
+  (la limitación por cuenta con retrasos progresivos sí es individual; ver `throttling.md`).
 - Recuperación de contraseña por correo (US7) y consulta de auditoría para el rol Auditor (US6):
   pendientes.
 - 47 CVE de Debian sin parche en la imagen del backend: aceptadas y vigiladas con Trivy.

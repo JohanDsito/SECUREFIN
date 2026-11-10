@@ -41,12 +41,15 @@ export default function Home() {
       <p>Rol: {user.role}</p>
       <p>La sesión caduca por inactividad a las {new Date(session.idle_expires_at).toLocaleTimeString()}.</p>
       <p>
-        <Link to="/profile">Mi perfil</Link> · <Link to="/sessions">Mis sesiones</Link>
+        <Link to="/finance">Panel financiero</Link> · <Link to="/profile">Mi perfil</Link> · <Link to="/sessions">Mis sesiones</Link>
       </p>
       {user.role === "admin" && (
         <p>
-          Administración: <Link to="/admin/users">Usuarios</Link> · <Link to="/admin/mfa-resets">Reinicios de MFA</Link>
+          Administración: <Link to="/admin/users">Usuarios</Link> · <Link to="/admin/mfa-resets">Reinicios de MFA</Link> · <Link to="/admin/finance/approvals">Aprobaciones financieras</Link>
         </p>
+      )}
+      {user.role === "auditor" && (
+        <p><Link to="/admin/finance/approvals">Consultar aprobaciones financieras</Link></p>
       )}
       <button type="button" onClick={logout}>Cerrar sesión</button>
     </section>
