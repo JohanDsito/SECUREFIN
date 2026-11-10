@@ -584,7 +584,7 @@ quickstart.md.
   - Reinicio tras un éxito y tras 30 min sin fallos.
   - Eventos `throttle_account_delay`, `throttle_ip_limited` y `credential_stuffing_suspected` (10 o más identificadores distintos en 15 min desde una IP).
 - [ ] T096 [P] [US5] Seguridad TS-S13/TS-S14 en `backend/tests/security/test_bruteforce.py`: en 100 intentos rápidos, como máximo 5 se evalúan antes del primer retraso; los intentos durante el retraso se rechazan sin invocar el hasher (mock); el comportamiento es idéntico para un identificador inexistente; los fallos de TOTP y de código de recuperación cuentan
-- [ ] T132 [P] [US5] Seguridad TS-S28 en `backend/tests/security/test_ip_rate_limits.py`: prueba **parametrizada** por ámbito de límite por IP (FR-037; correcciones G2 e I2). Cubre **solo los ámbitos disponibles al terminar US5**; el ámbito `recovery` lo prueba T137 en US7:
+- [X] T132 [P] [US5] Seguridad TS-S28 en `backend/tests/security/test_ip_rate_limits.py`: prueba **parametrizada** por ámbito de límite por IP (FR-037; correcciones G2 e I2). Cubre **solo los ámbitos disponibles al terminar US5**; el ámbito `recovery` lo prueba T137 en US7:
 
   | Ámbito | Ruta | Umbral |
   |---|---|---|
@@ -607,7 +607,7 @@ quickstart.md.
 - [ ] T098 [P] [US5] Crear `AuthThrottle` y su migración en `backend/apps/iam/models/throttle.py` (data-model): `scope` enum `account`; `key_digest` char(64) (HMAC con **`THROTTLE_HMAC_KEYS`**, C1); `key_version` varchar(6); `consecutive_failures` int ("Se reinicia tras un éxito o tras 30 min sin fallos"); `last_failure_at`; `blocked_until` nulo ("30 s · 2^(n−5), con tope de 900 s, desde n = 5"); restricción única `(scope, key_digest)`
 - [ ] T099 [US5] Implementar `backend/apps/iam/services/throttling.py` con `check(email)`, `register_failure(email, ip)` y `register_success(email)`. `check` consulta los resúmenes de **todas las versiones aceptadas** de `THROTTLE_HMAC_KEYS` y aplica el retraso más restrictivo; los fallos se registran en la versión activa, heredando el contador de la fila antigua (R12). Además: `select_for_update`, `throttle_digest()`, cálculo del retraso, eventos de anomalía y detección de relleno de credenciales (FR-036–FR-039)
 - [ ] T100 [US5] Integrar la limitación en `backend/apps/iam/services/authentication.py`: llamar a `throttling.check` **antes** de evaluar credenciales en `password_login` y `complete_mfa` (TOTP y código de recuperación); un rechazo durante el retraso devuelve el 401 genérico; fallos y éxitos se registran en todos los caminos
-- [ ] T101 [US5] Configurar los throttles de DRF en `backend/config/settings/base.py` y `backend/apps/iam/api/throttles.py`:
+- [X] T101 [US5] Configurar los throttles de DRF en `backend/config/settings/base.py` y `backend/apps/iam/api/throttles.py`:
   - `DEFAULT_THROTTLE_RATES` con `login 20/min`, `mfa 10/min`, `register 5/hour`, `recovery 5/hour`, `activation 10/hour` y `mfa_reset_request 3/day`; `NUM_PROXIES = 1`.
   - Asignar `throttle_scope` en las vistas de US1, US3 y US4. El ámbito `recovery` se define aquí, pero lo asigna T114 (US7) y lo prueba T137.
   - Ante 429, `Retry-After` y evento `throttle_ip_limited`.

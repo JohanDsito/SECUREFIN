@@ -26,6 +26,8 @@ from apps.iam.sessions.middleware import client_ip
 
 @anonymous_state_changing
 class ActivateView(APIView):
+    throttle_scope = "activation"  # T101: 10/h por IP
+
     def post(self, request):
         serializer = ActivateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

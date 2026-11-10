@@ -68,6 +68,8 @@ def _mfa_errors(func):
 # --- Login en dos pasos (pre_auth) ----------------------------------------------------------------
 @anonymous_state_changing
 class LoginMfaView(APIView):
+    throttle_scope = "mfa"  # T101: 10/min por IP (TOTP y códigos de recuperación)
+
     def post(self, request):
         data = _validated(LoginMfaSerializer, request)
         try:
@@ -92,7 +94,10 @@ class MfaResetRequestView(APIView):
     Solo desde `pre_auth` con MFA activo: sin sesión `pre_auth`, con sesión `full` o en alta
     obligatoria → 401 genérico. Crea el caso (o devuelve el abierto: idempotente), revoca todas las
     sesiones del titular y borra la cookie. Más de 3 casos en 24 h → 429 con `Retry-After`.
+    Además, límite por IP de 3 solicitudes al día (T101, ámbito `mfa_reset_request`).
     """
+
+    throttle_scope = "mfa_reset_request"
 
     def post(self, request):
         _validated(EmptySerializer, request)
@@ -123,6 +128,8 @@ class EnrollSetupView(APIView):
 
 @anonymous_state_changing
 class EnrollConfirmView(APIView):
+    throttle_scope = "mfa"  # T101: confirma un código TOTP
+
     def post(self, request):
         data = _validated(TotpCodeSerializer, request)
         try:

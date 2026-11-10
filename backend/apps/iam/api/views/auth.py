@@ -24,6 +24,8 @@ NEUTRAL_REGISTRATION_ERROR = "No fue posible completar el registro con los datos
 
 @anonymous_state_changing
 class RegisterView(APIView):
+    throttle_scope = "register"  # T101: 5/h por IP
+
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -39,6 +41,8 @@ class RegisterView(APIView):
 
 @anonymous_state_changing
 class LoginView(APIView):
+    throttle_scope = "login"  # T101: 20/min por IP
+
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

@@ -11,6 +11,7 @@ Comprueba que se rechazan:
 
 from __future__ import annotations
 
+import itertools
 import uuid
 
 import pytest
@@ -25,9 +26,16 @@ from tests.helpers import fresh_totp, make_totp_device, opened_case, requested_c
 pytestmark = pytest.mark.security
 
 
+_ips = itertools.count(1)
+
+
 def _create_pre_auth_client(api_factory, user):
-    """Crea una sesión pre_auth real para un usuario con MFA activo."""
-    client = api_factory()
+    """Crea una sesión pre_auth real para un usuario con MFA activo.
+
+    Cada cliente sale de una IP distinta: así estas pruebas validan las reglas POR TITULAR
+    (idempotencia, 3 casos en 24 h) sin que las tape el límite por IP de T101 (3/día).
+    """
+    client = api_factory(ip=f"198.51.100.{next(_ips) % 250 + 1}")
     resp = client.login(user.email, STRONG_PASSWORD)
     assert resp.status_code == 200 and resp.json().get("status") == "mfa_required"
     return client

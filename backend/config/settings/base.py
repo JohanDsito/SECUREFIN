@@ -149,6 +149,16 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "EXCEPTION_HANDLER": "apps.iam.api.exceptions.exception_handler",
     "NUM_PROXIES": 1,
+    # Limitación por IP (T101; R12). Solo actúa en las vistas que declaran `throttle_scope`.
+    "DEFAULT_THROTTLE_CLASSES": ["apps.iam.api.throttles.IpScopedRateThrottle"],
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "20/min",
+        "mfa": "10/min",
+        "register": "5/hour",
+        "recovery": "5/hour",
+        "activation": "10/hour",
+        "mfa_reset_request": "3/day",
+    },
     "UNAUTHENTICATED_USER": "django.contrib.auth.models.AnonymousUser",
 }
 

@@ -20,10 +20,13 @@ SAMPLES = int(os.environ.get("SECUREFIN_TIMING_SAMPLES", "200"))
 WRONG = "contraseña incorrecta pero larga"
 
 
-def _measure(api_factory, emails):
+def _measure(api_factory, emails, network: int):
+    """Una IP distinta por intento (198.18.0.0/15, rango de pruebas de RFC 2544): esta prueba mide la
+    resistencia a la enumeración por tiempo, no la limitación por IP (T101), que tiene sus propias
+    pruebas en test_ip_rate_limits.py."""
     timings, responses = [], []
-    for email in emails:
-        client = api_factory()
+    for i, email in enumerate(emails):
+        client = api_factory(ip=f"198.{18 + network}.{i // 250}.{i % 250 + 1}")
         client.fetch_csrf()
         start = time.perf_counter()
         response = client.login(email, WRONG)
@@ -35,8 +38,8 @@ def _measure(api_factory, emails):
 def test_s27_login_enumeration_resistance(api_factory, make_user):
     existing = [make_user().email for _ in range(SAMPLES)]
     unknown = [f"inexistente{i}@lab.securefin.local" for i in range(SAMPLES)]
-    t_exist, r_exist = _measure(api_factory, existing)
-    t_unknown, r_unknown = _measure(api_factory, unknown)
+    t_exist, r_exist = _measure(api_factory, existing, network=0)
+    t_unknown, r_unknown = _measure(api_factory, unknown, network=1)
 
     for a, b in zip(r_exist, r_unknown):
         assert a.status_code == b.status_code == 401
