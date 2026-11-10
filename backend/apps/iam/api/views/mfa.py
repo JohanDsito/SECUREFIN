@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import functools
 
+from django.contrib.auth import logout
 from rest_framework import status
-from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError
+from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, Throttled, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -31,7 +32,7 @@ from apps.iam.api.serializers.mfa import (
 )
 from apps.iam.api.views.users import OwnResourceView
 from apps.iam.policies.matrix import MFA_DISABLE_SELF, MFA_SELF, RECOVERY_CODES_SELF
-from apps.iam.services import authentication, mfa, recovery_codes
+from apps.iam.services import authentication, mfa, mfa_reset, recovery_codes
 from apps.iam.services.mfa_state import user_mfa_enabled
 from apps.iam.sessions.middleware import client_ip
 
@@ -82,6 +83,32 @@ class LoginMfaView(APIView):
         if remaining is not None:
             body["recovery_codes_remaining"] = remaining
         return _no_store(Response(body))
+
+
+@anonymous_state_changing
+class MfaResetRequestView(APIView):
+    """POST /auth/login/mfa-reset-request (T090; R11 paso 1; FR-032, FR-034).
+
+    Solo desde `pre_auth` con MFA activo: sin sesión `pre_auth`, con sesión `full` o en alta
+    obligatoria → 401 genérico. Crea el caso (o devuelve el abierto: idempotente), revoca todas las
+    sesiones del titular y borra la cookie. Más de 3 casos en 24 h → 429 con `Retry-After`.
+    """
+
+    def post(self, request):
+        _validated(EmptySerializer, request)
+        user = authentication.pending_user(request)
+        if user is None:
+            raise AuthenticationFailed()
+        try:
+            mfa_reset.request_reset(user, source_ip=client_ip(request))
+        except mfa_reset.MfaNotEnabledError as exc:
+            raise AuthenticationFailed() from exc
+        except mfa_reset.RateLimitError as exc:
+            raise Throttled(wait=exc.retry_after) from exc
+        except mfa_reset.CaseConflictError:
+            pass  # otro caso abierto creado a la vez: misma respuesta (idempotente)
+        logout(request)  # la fila ya se revocó; flush() emite el borrado de la cookie
+        return Response({"status": "mfa_reset_requested"}, status=status.HTTP_202_ACCEPTED)
 
 
 @anonymous_state_changing

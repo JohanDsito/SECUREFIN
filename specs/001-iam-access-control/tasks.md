@@ -495,7 +495,7 @@ y que un no administrador no puede hacerlo. Escenarios V3, V10, V15 y V16 de qui
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T082 [P] [US4] Seguridad TS-S12 en `backend/tests/security/test_mfa_reset_abuse.py`, comprobando que se rechazan:
+- [X] T082 [P] [US4] Seguridad TS-S12 en `backend/tests/security/test_mfa_reset_abuse.py`, comprobando que se rechazan:
   - abrir un caso propio (403);
   - autorizar sin TOTP del Administrador, o por un Administrador distinto del que abrió (403);
   - un código caducado (más de 10 min) o reutilizado (409);
@@ -507,7 +507,7 @@ y que un no administrador no puede hacerlo. Escenarios V3, V10, V15 y V16 de qui
   - `iam_bootstrap_admin` falla si ya hay un Administrador y no imprime tokens.
   - `iam_break_glass` falla si existe otro Administrador activo con MFA y registra `break_glass_executed` con el usuario del sistema operativo.
   - Con un fallo simulado de `record_event`, el cambio de rol y la desactivación se revierten (FR-044).
-- [ ] T084 [P] [US4] Contrato TS-C01 (parte US4) en `backend/tests/contract/test_admin_contract.py`: todas las rutas de `contracts/iam-api.md` §4, más `POST /auth/activate` y `POST /auth/login/mfa-reset-request`
+- [X] T084 [P] [US4] Contrato TS-C01 (parte US4) en `backend/tests/contract/test_admin_contract.py`: todas las rutas de `contracts/iam-api.md` §4, más `POST /auth/activate` y `POST /auth/login/mfa-reset-request`
 - [ ] T139 [US4] Crear el *fixture* de Mailpit en `frontend/tests/e2e/fixtures/mailpit.js` para las E2E de US4, US7 y Polish (corrección U2):
   - **Acceso**: solo la API REST autenticada de Mailpit a través de Nginx en `https://127.0.0.1:8025` (CA de laboratorio efímera), con Basic Auth tomada de `MAILPIT_API_USER` y `MAILPIT_API_PASSWORD` (variables de entorno efímeras; si faltan, la prueba **falla**, no se omite).
   - **Funciones**:
@@ -526,18 +526,18 @@ y que un no administrador no puede hacerlo. Escenarios V3, V10, V15 y V16 de qui
 
 ### Implementation for User Story 4
 
-- [ ] T086 [US4] Implementar `backend/apps/iam/services/admin_users.py` (FR-019, FR-020, FR-012, FR-044), con evento y revocación de sesiones dentro de la misma `transaction.atomic`:
+- [X] T086 [US4] Implementar `backend/apps/iam/services/admin_users.py` (FR-019, FR-020, FR-012, FR-044), con evento y revocación de sesiones dentro de la misma `transaction.atomic`:
   - `list_users` con filtros `role` y `status` y paginación.
   - `create_privileged_user(email, name, role ∈ {admin, auditor})`: `pending_activation`, contraseña inutilizable, `outbox.enqueue("account_activation")` y evento **`account_created_by_admin`** (actor = Administrador, objetivo = nueva cuenta, `metadata.role`) en la misma transacción (I1).
   - `change_role`, `deactivate` y `reactivate`: prohibido actuar sobre sí mismo (403) y bloqueo de fila sobre los Administradores activos para impedir dejar 0 (409).
-- [ ] T087 [US4] Registrar el *handler* `account_activation` del outbox en `backend/apps/iam/services/activation.py` y crear la vista `POST /auth/activate` en `backend/apps/iam/api/views/activation.py` (FR-021):
+- [X] T087 [US4] Registrar el *handler* `account_activation` del outbox en `backend/apps/iam/services/activation.py` y crear la vista `POST /auth/activate` en `backend/apps/iam/api/views/activation.py` (FR-021):
   - El *handler* ejecuta `tokens.issue(user, "account_activation")` (24 h) y envía el enlace `https://securefin.local/activate#token=…`. **Tras la entrega SMTP correcta** registra `activation_sent` (objetivo = usuario, sin token ni enlace) (I1).
   - `activate(token, password)` aplica los validadores, cambia el estado a `active` y registra `account_activated`.
   - La vista usa `anonymous_state_changing`; ante cualquier fallo, `400 invalid_token`.
-- [ ] T088 [P] [US4] Crear `MfaResetCase` y su migración en `backend/apps/iam/models/mfa_reset.py` (data-model):
+- [X] T088 [P] [US4] Crear `MfaResetCase` y su migración en `backend/apps/iam/models/mfa_reset.py` (data-model):
   - **Campos**: `target_user`; `requested_by`; `request_verification` enum `password` \| `console`; `requested_at`; `opened_by` nulo; `request_channel` enum `in_person` \| `course_channel` nulo; `opened_at`; `challenge_verifier` varchar(128) nulo ("se borra al autorizar o cancelar"); `challenge_expires_at` ("Entrega + 10 min"); `challenge_attempts` ("Máximo 3"); `status` enum `requested` \| `pending_verification` \| `authorized` \| `cancelled` \| `expired`; `authorized_by`; `authorized_at`; `verification_method` varchar(64).
   - **Restricción**: un caso abierto por titular.
-- [ ] T089 [US4] Implementar `backend/apps/iam/services/mfa_reset.py` (R11, FR-032–FR-035):
+- [X] T089 [US4] Implementar `backend/apps/iam/services/mfa_reset.py` (R11, FR-032–FR-035):
   - **`request_reset`**: solo desde `pre_auth`; crea el caso `requested` con `request_verification = password`; como máximo 3 en 24 h; evento `mfa_reset_requested`; cierra la sesión `pre_auth`.
   - **`open_case`**: el Administrador tiene MFA activo y es distinto del titular; guarda el canal; encola `mfa_reset_challenge`; evento `mfa_reset_case_opened`.
   - ***Handler* `mfa_reset_challenge`**: código de 8 caracteres con `codes.generate_verification_code()`, verificador Argon2id (`memory_cost=19456`, `time_cost=2`, `parallelism=1`) y caducidad de 10 min **desde la entrega**.
@@ -545,7 +545,7 @@ y que un no administrador no puede hacerlo. Escenarios V3, V10, V15 y V16 de qui
   - ***Handler* `mfa_reset_notice`** (registrado en el outbox; corrección I2): compone el correo de `contracts/iam-api.md` §8 con la fecha del reinicio, un aviso y qué hacer si no lo solicitó, sin datos del Administrador más allá del rol y sin enlaces con tokens.
   - **`cancel`**: evento `mfa_reset_cancelled`.
   - **Garantías**: nunca modifica la contraseña ni devuelve secretos.
-- [ ] T090 [US4] Implementar `backend/apps/iam/api/serializers/admin.py` y `backend/apps/iam/api/views/admin.py` (rutas en `backend/apps/iam/api/urls.py`), con `HasRolePermission` de Administrador e `IsFullyAuthenticated`:
+- [X] T090 [US4] Implementar `backend/apps/iam/api/serializers/admin.py` y `backend/apps/iam/api/views/admin.py` (rutas en `backend/apps/iam/api/urls.py`), con `HasRolePermission` de Administrador e `IsFullyAuthenticated`:
   - `GET /admin/users`, `POST /admin/users`, `POST /admin/users/{id}/activation/resend`, `PATCH /admin/users/{id}/role`, `POST /admin/users/{id}/deactivate` y `/reactivate`.
   - `GET /admin/mfa-resets?status=requested`, `POST /admin/mfa-resets/{id}/open`, `/authorize` y `/cancel`.
   - `POST /auth/login/mfa-reset-request` (`pre_auth`).

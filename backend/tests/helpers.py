@@ -74,3 +74,46 @@ def totp_code(secret: str, at=None, steps: int = 0) -> str:
 
     moment = (at or clock.now()) + timedelta(seconds=steps * TOTP_PERIOD)
     return pyotp.TOTP(secret).at(moment)
+
+
+def fresh_totp(user) -> str:
+    """Código TOTP actual de `user` tras liberar la antirrepetición (el login ya consumió el intervalo)."""
+    from apps.iam.models import TOTPDevice
+
+    TOTPDevice.objects.filter(user=user, status="active").update(last_used_timestep=None)
+    return totp_code(user.totp_secret)
+
+
+# --- Reinicio de MFA (US4) --------------------------------------------------------------------------
+def requested_case(target):
+    """Caso `requested` creado por el flujo real del servicio (el titular necesita MFA activo)."""
+    from apps.iam.services import mfa_reset
+    from apps.iam.services.mfa_state import user_mfa_enabled
+
+    if not user_mfa_enabled(target):
+        make_totp_device(target)
+    return mfa_reset.request_reset(target)
+
+
+def deliver_challenge_code(target) -> str:
+    """Entrega el outbox y devuelve el código de 8 caracteres del último correo al titular."""
+    import re
+
+    from django.core import mail
+
+    from apps.iam.services import outbox
+
+    outbox.deliver_due()
+    bodies = [m.body for m in mail.outbox if m.to == [target.email] and "verificación" in m.subject]
+    match = re.search(r"^\s{4}([0-9A-Z]{8})$", bodies[-1], re.MULTILINE)
+    assert match, "el correo del desafío no contiene el código"
+    return match.group(1)
+
+
+def opened_case(admin, target, channel: str = "in_person"):
+    """Caso `pending_verification` abierto por `admin`; devuelve (caso, código del desafío)."""
+    from apps.iam.services import mfa_reset
+
+    case = requested_case(target)
+    mfa_reset.open_case(admin, case.id, channel)
+    return case, deliver_challenge_code(target)

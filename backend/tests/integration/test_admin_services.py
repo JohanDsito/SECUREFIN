@@ -190,6 +190,7 @@ def test_mfa_reset_request_idempotent_and_rate_limited(make_user, clock):
 def test_mfa_reset_open_case_requires_mfa_on_admin(make_user):
     admin_no_mfa = make_user(role=Role.ADMIN)
     target = make_user()
+    make_totp_device(target)
     case = mfa_reset.request_reset(target)
 
     with pytest.raises(mfa_reset.MfaNotEnabledError):
@@ -290,4 +291,216 @@ def test_mfa_reset_third_failure_cancels_case(make_user):
             verification_code="BADCODE1",
             admin_totp_code=totp_code(admin_secret),
         )
+
+
+# --- Correcciones de la auditoría de US4 ------------------------------------------------------------
+
+def test_reactivate_requires_deactivated_and_revokes_sessions(make_user):
+    from tests.helpers import build_session
+
+    admin = make_user(role=Role.ADMIN)
+    active = make_user()
+    with pytest.raises(admin_users.InvalidStatusError):
+        admin_users.reactivate(admin, active)
+    pending = make_user(status=Status.PENDING_ACTIVATION)
+    with pytest.raises(admin_users.InvalidStatusError):
+        admin_users.reactivate(admin, pending)  # no se salta la activación por correo
+
+    target = make_user(status=Status.DEACTIVATED)
+    build_session(target)  # fila residual
+    admin_users.reactivate(admin, target)
+    from apps.iam.models import UserSession
+
+    assert not UserSession.objects.filter(user=target).exists()
+    assert SecurityEvent.objects.filter(
+        event_type="sessions_revoked", target_id=target.id, metadata__reason="account_reactivated"
+    ).exists()
+
+
+def test_deactivate_requires_active(make_user):
+    admin = make_user(role=Role.ADMIN)
+    with pytest.raises(admin_users.InvalidStatusError):
+        admin_users.deactivate(admin, make_user(status=Status.PENDING_ACTIVATION))
+
+
+def test_change_role_to_same_role_is_noop(make_user):
+    admin = make_user(role=Role.ADMIN)
+    target = make_user(role=Role.AUDITOR)
+    admin_users.change_role(admin, target, Role.AUDITOR)
+    assert not SecurityEvent.objects.filter(event_type="role_changed", target_id=target.id).exists()
+
+
+def test_actor_demoted_meanwhile_cannot_operate(make_user):
+    admin_a = make_user(role=Role.ADMIN)
+    admin_b = make_user(role=Role.ADMIN)
+    make_user(role=Role.ADMIN)  # un tercero: no hay riesgo de último Administrador
+    admin_users.change_role(admin_a, admin_b, Role.CLIENT)
+    with pytest.raises(admin_users.ActorNotAdminError):
+        admin_users.deactivate(admin_b, make_user())  # objeto de B desactualizado
+
+
+def test_resend_activation_requires_pending(make_user):
+    admin = make_user(role=Role.ADMIN)
+    with pytest.raises(admin_users.InvalidStatusError):
+        admin_users.resend_activation(admin, make_user())
+    pending = make_user(status=Status.PENDING_ACTIVATION)
+    admin_users.resend_activation(admin, pending)
+    assert OutboxMessage.objects.filter(user=pending, kind=OutboxKind.ACCOUNT_ACTIVATION).count() == 1
+
+
+def test_list_users_filters_and_annotates_mfa(make_user):
+    admin = make_user(role=Role.ADMIN)
+    make_totp_device(admin)
+    page = admin_users.list_users(role=Role.ADMIN)
+    row = next(u for u in page.object_list if u.id == admin.id)
+    assert row.mfa_enabled is True
+    assert all(u.role == Role.ADMIN for u in page.object_list)
+
+
+def test_activation_weak_password_keeps_token_usable(make_user):
+    user = make_user(status=Status.PENDING_ACTIVATION)
+    token = tokens.issue(user, "account_activation")
+    with pytest.raises(ValidationError):
+        activation.activate(token, "corta")
+    user.refresh_from_db()
+    assert user.status == Status.PENDING_ACTIVATION
+    assert activation.activate(token, STRONG_PASSWORD).status == Status.ACTIVE
+
+
+def test_activation_rejects_account_no_longer_pending(make_user):
+    user = make_user(status=Status.PENDING_ACTIVATION)
+    token = tokens.issue(user, "account_activation")
+    User.objects.filter(pk=user.pk).update(status=Status.DEACTIVATED)
+    with pytest.raises(tokens.InvalidToken):
+        activation.activate(token, STRONG_PASSWORD)
+    user.refresh_from_db()
+    assert user.status == Status.DEACTIVATED
+
+
+def test_request_reset_requires_mfa(make_user):
+    with pytest.raises(mfa_reset.MfaNotEnabledError):
+        mfa_reset.request_reset(make_user())
+
+
+def test_requested_case_expires_after_24h_and_unblocks_new_request(make_user, clock):
+    user = make_user()
+    make_totp_device(user)
+    old = mfa_reset.request_reset(user)
+    clock.advance(hours=24, seconds=1)
+    new = mfa_reset.request_reset(user)
+    assert new.id != old.id
+    old.refresh_from_db()
+    assert old.status == MfaResetStatus.EXPIRED
+
+
+def test_cancel_rejects_resolved_case(make_user):
+    admin = make_user(role=Role.ADMIN)
+    admin_secret = make_totp_device(admin)
+    target = make_user()
+    make_totp_device(target)
+    case = mfa_reset.request_reset(target)
+    mfa_reset.open_case(admin, case.id, "in_person")
+    outbox.deliver_due()
+    import re
+
+    code = re.search(r"^\s{4}([0-9A-Z]{8})$", mail.outbox[-1].body, re.MULTILINE).group(1)
+    mfa_reset.authorize(admin, case.id, code, totp_code(admin_secret))
+    with pytest.raises(mfa_reset.CaseConflictError):
+        mfa_reset.cancel(admin, case.id)
+    case.refresh_from_db()
+    assert case.status == MfaResetStatus.AUTHORIZED  # nunca vuelve a cancelled
+
+
+def test_cancel_records_event_and_clears_verifier(make_user):
+    admin = make_user(role=Role.ADMIN)
+    make_totp_device(admin)
+    target = make_user()
+    make_totp_device(target)
+    case = mfa_reset.request_reset(target)
+    mfa_reset.open_case(admin, case.id, "in_person")
+    outbox.deliver_due()
+    mfa_reset.cancel(admin, case.id)
+    case.refresh_from_db()
+    assert case.status == MfaResetStatus.CANCELLED and case.challenge_verifier is None
+    assert SecurityEvent.objects.filter(event_type="mfa_reset_cancelled", target_id=target.id).exists()
+
+
+def test_open_case_rejects_inactive_holder(make_user):
+    admin = make_user(role=Role.ADMIN)
+    make_totp_device(admin)
+    target = make_user()
+    make_totp_device(target)
+    case = mfa_reset.request_reset(target)
+    User.objects.filter(pk=target.pk).update(status=Status.DEACTIVATED)
+    with pytest.raises(mfa_reset.CaseConflictError):
+        mfa_reset.open_case(admin, case.id, "in_person")
+
+
+def test_authorize_keeps_used_recovery_codes_as_used(make_user):
+    admin = make_user(role=Role.ADMIN)
+    admin_secret = make_totp_device(admin)
+    target = make_user()
+    make_totp_device(target)
+    codes_ = recovery_codes.generate_batch(target)
+    assert recovery_codes.consume(target, codes_[0]) == 9
+    case = mfa_reset.request_reset(target)
+    mfa_reset.open_case(admin, case.id, "in_person")
+    outbox.deliver_due()
+    import re
+
+    code = re.search(r"^\s{4}([0-9A-Z]{8})$", mail.outbox[-1].body, re.MULTILINE).group(1)
+    mfa_reset.authorize(admin, case.id, code, totp_code(admin_secret))
+    statuses = sorted(RecoveryCode.objects.filter(user=target).values_list("status", flat=True))
+    assert statuses.count(RecoveryCodeStatus.USED) == 1
+    assert statuses.count(RecoveryCodeStatus.INVALIDATED) == 9
+
+
+# --- Concurrencia -----------------------------------------------------------------------------------
+
+def _race(*targets):
+    import threading
+
+    from django.db import connection
+
+    barrier = threading.Barrier(len(targets))
+    results = []
+
+    def run(fn):
+        try:
+            barrier.wait()
+            results.append(fn())
+        except Exception as exc:  # noqa: BLE001 - se inspecciona en la prueba
+            results.append(exc)
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=run, args=(fn,)) for fn in targets]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return results
+
+
+def test_concurrent_mutual_demotion_keeps_one_admin(concurrent_db, make_user):
+    """Dos Administradores que se degradan a la vez: uno gana, el otro recibe 409; queda uno activo."""
+    User.objects.filter(role=Role.ADMIN).delete()
+    admin_a = make_user(role=Role.ADMIN)
+    admin_b = make_user(role=Role.ADMIN)
+
+    results = _race(
+        lambda: admin_users.change_role(admin_a, admin_b, Role.AUDITOR),
+        lambda: admin_users.deactivate(admin_b, admin_a),
+    )
+    assert sum(isinstance(r, User) for r in results) == 1
+    assert sum(isinstance(r, admin_users.LastAdminError) for r in results) == 1
+    assert User.objects.filter(role=Role.ADMIN, status=Status.ACTIVE).count() == 1
+
+
+def test_concurrent_reset_requests_create_one_case(concurrent_db, make_user):
+    user = make_user()
+    make_totp_device(user)
+    results = _race(lambda: mfa_reset.request_reset(user), lambda: mfa_reset.request_reset(user))
+    assert not [r for r in results if isinstance(r, Exception)]
+    assert MfaResetCase.objects.filter(target_user=user).count() == 1
 

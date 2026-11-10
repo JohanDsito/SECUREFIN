@@ -1,21 +1,30 @@
 """Administración de usuarios y roles por Administradores (T086; FR-012, FR-019, FR-020, FR-044).
 
-- Listado con filtros y paginación.
+- Listado con filtros y paginación (sin N+1: `mfa_enabled` se anota con EXISTS).
 - Alta de cuentas privilegiadas (Admin/Auditor) en pending_activation con enlace por outbox.
-- Cambio de rol, desactivación y reactivación.
+- Cambio de rol, desactivación y reactivación según el diagrama de estados de data-model:
+  active → deactivated → active; cualquier otra transición → InvalidStatusError (409).
 - Prohibición estricta de autooperaciones (403).
-- Protección transaccional del último Administrador activo (409) con select_for_update.
-- Revocación inmediata de sesiones y registro de eventos en la misma transacción atómica (FR-044).
+- Invariante "al menos un Administrador activo" (409): se bloquean con SELECT … FOR UPDATE, en orden
+  de id, todas las filas de Administradores activos y después la del objetivo. Así dos
+  Administradores que se degradan mutuamente se serializan en lugar de interbloquearse.
+- Revocación de sesiones y evento de auditoría en la misma transacción atómica (FR-012, FR-044).
 """
 
 from __future__ import annotations
 
+import uuid
+
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef
 
 from apps.audit.services import record_event
-from apps.iam.models import Role, Status, User
+from apps.iam.models import OutboxKind, Role, Status, TOTPDevice, TOTPStatus, User
 from apps.iam.services import outbox, session_admin
+
+PAGE_SIZE = 20
+PRIVILEGED_ROLES = (Role.ADMIN, Role.AUDITOR)
 
 
 class AdminOperationError(Exception):
@@ -42,24 +51,67 @@ class UserAlreadyExistsError(AdminOperationError):
     """El correo ya está registrado en el sistema."""
 
 
-def list_users(
-    role: str | None = None,
-    status: str | None = None,
-    page: int = 1,
-    page_size: int = 20,
-):
-    """Lista usuarios con filtros opcionales de rol y estado, paginados."""
-    qs = User.objects.all().order_by("-created_at")
-    if role and role in Role.values:
+class UserNotFoundError(AdminOperationError):
+    """No existe ningún usuario con ese identificador (o el identificador está mal formado)."""
+
+
+class ActorNotAdminError(AdminOperationError):
+    """El actor dejó de ser Administrador activo mientras esperaba el bloqueo (carrera)."""
+
+
+# --- Consultas --------------------------------------------------------------------------------------
+def list_users(role: str | None = None, status: str | None = None, page: int = 1, page_size: int = PAGE_SIZE):
+    """Página de usuarios con filtros opcionales; cada fila lleva `mfa_enabled` anotado."""
+    qs = User.objects.annotate(
+        mfa_enabled=Exists(TOTPDevice.objects.filter(user=OuterRef("pk"), status=TOTPStatus.ACTIVE))
+    ).order_by("-created_at", "id")
+    if role:
         qs = qs.filter(role=role)
-    if status and status in Status.values:
+    if status:
         qs = qs.filter(status=status)
-
-    paginator = Paginator(qs, page_size)
-    page_obj = paginator.get_page(page)
-    return page_obj
+    return Paginator(qs, page_size).get_page(page)
 
 
+def get_user(user_id) -> User:
+    """Usuario por id; inexistente o mal formado → UserNotFoundError (la vista responde 404)."""
+    try:
+        pk = uuid.UUID(str(user_id))
+    except ValueError as exc:
+        raise UserNotFoundError from exc
+    user = User.objects.filter(pk=pk).first()
+    if user is None:
+        raise UserNotFoundError
+    return user
+
+
+# --- Bloqueos ---------------------------------------------------------------------------------------
+def _lock_admins_and_target(target_id) -> tuple[User, list]:
+    """Bloquea (en orden de id) los Administradores activos y después el objetivo."""
+    admin_ids = list(
+        User.objects.select_for_update()
+        .filter(role=Role.ADMIN, status=Status.ACTIVE)
+        .order_by("id")
+        .values_list("id", flat=True)
+    )
+    return User.objects.select_for_update().get(pk=target_id), admin_ids
+
+
+def _check_invariants(actor: User, target: User, admin_ids: list, removes_admin: bool) -> None:
+    """Con los bloqueos tomados: primero el invariante del último Administrador (409) y después que
+    el actor siga siendo Administrador activo (otra transacción pudo degradarlo mientras esperaba)."""
+    if removes_admin and target.role == Role.ADMIN and target.status == Status.ACTIVE and len(admin_ids) <= 1:
+        raise LastAdminError("No se puede degradar ni desactivar al último administrador activo.")
+    if actor.id not in admin_ids:
+        raise ActorNotAdminError("El actor ya no es un Administrador activo.")
+
+
+def _sync(instance: User, fresh: User, *fields: str) -> None:
+    """Refleja en el objeto del llamador los campos cambiados en la fila bloqueada."""
+    for field in fields:
+        setattr(instance, field, getattr(fresh, field))
+
+
+# --- Operaciones ------------------------------------------------------------------------------------
 def create_privileged_user(
     admin_user: User,
     email: str,
@@ -68,27 +120,22 @@ def create_privileged_user(
     source_ip: str | None = None,
 ) -> User:
     """Crea una cuenta privilegiada (admin o auditor) en pending_activation y encola activación."""
-    if role not in (Role.ADMIN, Role.AUDITOR):
+    if role not in PRIVILEGED_ROLES:
         raise InvalidRoleError("Solo se pueden crear usuarios con rol admin o auditor.")
 
-    email_clean = (email or "").strip().lower()
+    email_clean = User.objects.normalize_email(email)
     name_clean = (name or "").strip()
 
     if User.objects.filter(email=email_clean).exists():
         raise UserAlreadyExistsError("El usuario ya se encuentra registrado.")
 
-    user = User(
-        email=email_clean,
-        name=name_clean,
-        role=role,
-        status=Status.PENDING_ACTIVATION,
-    )
+    user = User(email=email_clean, name=name_clean, role=role, status=Status.PENDING_ACTIVATION)
     user.set_unusable_password()
 
     try:
         with transaction.atomic():
             user.save()
-            outbox.enqueue("account_activation", user)
+            outbox.enqueue(OutboxKind.ACCOUNT_ACTIVATION, user)
             record_event(
                 "account_created_by_admin",
                 "success",
@@ -98,7 +145,7 @@ def create_privileged_user(
                 source_ip=source_ip,
                 metadata={"role": role},
             )
-    except IntegrityError as exc:
+    except IntegrityError as exc:  # carrera con otra alta del mismo correo (índice único)
         raise UserAlreadyExistsError("El usuario ya existe.") from exc
 
     return user
@@ -113,28 +160,19 @@ def change_role(
     """Modifica el rol de un usuario. Revoca sesiones y audita en la misma transacción."""
     if admin_user.id == target_user.id:
         raise SelfOperationError("Un administrador no puede modificar su propio rol.")
-
     if new_role not in Role.values:
-        raise InvalidRoleError(f"Rol desconocido: {new_role}")
+        raise InvalidRoleError("Rol desconocido.")
 
     with transaction.atomic():
-        # Bloquear fila del usuario destino
-        target = User.objects.select_for_update().get(id=target_user.id)
-
-        # Si se degrada a un Administrador activo, verificar que no sea el último
-        if target.role == Role.ADMIN and new_role != Role.ADMIN and target.status == Status.ACTIVE:
-            active_admin_count = (
-                User.objects.select_for_update()
-                .filter(role=Role.ADMIN, status=Status.ACTIVE)
-                .count()
-            )
-            if active_admin_count <= 1:
-                raise LastAdminError("No se puede degradar al último administrador activo.")
+        target, admin_ids = _lock_admins_and_target(target_user.id)
+        _check_invariants(admin_user, target, admin_ids, removes_admin=new_role != Role.ADMIN)
+        if target.role == new_role:
+            return target  # sin cambios: ni revocación ni evento
 
         old_role = target.role
         target.role = new_role
-        target_user.role = new_role
         target.save(update_fields=["role"])
+        _sync(target_user, target, "role")
 
         session_admin.revoke_all(target, actor=admin_user, reason="role_changed")
         record_event(
@@ -146,7 +184,6 @@ def change_role(
             source_ip=source_ip,
             metadata={"from_role": old_role, "to_role": new_role},
         )
-
     return target
 
 
@@ -155,26 +192,19 @@ def deactivate(
     target_user: User,
     source_ip: str | None = None,
 ) -> User:
-    """Desactiva una cuenta. Revoca sesiones y audita en la misma transacción."""
+    """Desactiva una cuenta activa. Revoca sesiones y audita en la misma transacción."""
     if admin_user.id == target_user.id:
         raise SelfOperationError("Un administrador no puede desactivar su propia cuenta.")
 
     with transaction.atomic():
-        target = User.objects.select_for_update().get(id=target_user.id)
-
-        # Si se desactiva a un Administrador activo, verificar que no sea el último
-        if target.role == Role.ADMIN and target.status == Status.ACTIVE:
-            active_admin_count = (
-                User.objects.select_for_update()
-                .filter(role=Role.ADMIN, status=Status.ACTIVE)
-                .count()
-            )
-            if active_admin_count <= 1:
-                raise LastAdminError("No se puede desactivar al último administrador activo.")
+        target, admin_ids = _lock_admins_and_target(target_user.id)
+        _check_invariants(admin_user, target, admin_ids, removes_admin=True)
+        if target.status != Status.ACTIVE:
+            raise InvalidStatusError("Solo se pueden desactivar cuentas activas.")
 
         target.status = Status.DEACTIVATED
-        target_user.status = Status.DEACTIVATED
         target.save(update_fields=["status"])
+        _sync(target_user, target, "status")
 
         session_admin.revoke_all(target, actor=admin_user, reason="account_deactivated")
         record_event(
@@ -185,7 +215,6 @@ def deactivate(
             target_id=target.id,
             source_ip=source_ip,
         )
-
     return target
 
 
@@ -194,12 +223,20 @@ def reactivate(
     target_user: User,
     source_ip: str | None = None,
 ) -> User:
-    """Reactiva una cuenta desactivada y audita el cambio."""
+    """Reactiva una cuenta desactivada; revoca sus sesiones (FR-012 e) y audita."""
+    if admin_user.id == target_user.id:
+        raise SelfOperationError("Un administrador no puede reactivar su propia cuenta.")
+
     with transaction.atomic():
-        target = User.objects.select_for_update().get(id=target_user.id)
+        target = User.objects.select_for_update().get(pk=target_user.id)
+        if target.status != Status.DEACTIVATED:
+            raise InvalidStatusError("Solo se pueden reactivar cuentas desactivadas.")
+
         target.status = Status.ACTIVE
         target.save(update_fields=["status"])
+        _sync(target_user, target, "status")
 
+        session_admin.revoke_all(target, actor=admin_user, reason="account_reactivated")
         record_event(
             "account_reactivated",
             "success",
@@ -208,16 +245,18 @@ def reactivate(
             target_id=target.id,
             source_ip=source_ip,
         )
-
     return target
 
 
-def resend_activation(
-    admin_user: User,
-    target_user: User,
-) -> None:
-    """Reenvía la activación encolando un nuevo mensaje en el outbox si sigue pendiente."""
-    if target_user.status != Status.PENDING_ACTIVATION:
-        raise InvalidStatusError("Solo se puede reenviar activación a cuentas pendientes.")
+def resend_activation(admin_user: User, target_user: User) -> None:
+    """Encola un nuevo correo de activación para una cuenta pendiente.
 
-    outbox.enqueue("account_activation", target_user)
+    El token se genera al entregar e invalida el anterior (tokens.issue). El catálogo cerrado de
+    eventos no tiene un tipo propio para el reenvío: la entrega queda registrada con
+    `activation_sent` (o `email_delivery_failed`).
+    """
+    with transaction.atomic():
+        target = User.objects.select_for_update().get(pk=target_user.id)
+        if target.status != Status.PENDING_ACTIVATION:
+            raise InvalidStatusError("Solo se puede reenviar la activación a cuentas pendientes.")
+        outbox.enqueue(OutboxKind.ACCOUNT_ACTIVATION, target)

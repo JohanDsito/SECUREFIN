@@ -51,13 +51,21 @@ outbox.register_handler(OutboxKind.ACCOUNT_ACTIVATION, handle_account_activation
 
 
 def activate(token: str, password: str, source_ip: str | None = None) -> User:
-    """Canjea el token de activación, establece la contraseña y pasa la cuenta a active."""
-    user = tokens.redeem(token, TokenPurpose.ACCOUNT_ACTIVATION)
+    """Canjea el token de activación, establece la contraseña y pasa la cuenta a active.
 
+    Todo ocurre en una única transacción: si la contraseña incumple la política
+    (``django.core.exceptions.ValidationError``), el canje se revierte y el enlace sigue sirviendo
+    para un segundo intento. Cualquier problema del token, o una cuenta que ya no está pendiente,
+    lanza ``tokens.InvalidToken`` (mismo error para usado, caducado, sustituido o alterado).
+    """
     norm_password = normalize_password(password)
-    validate_password(norm_password, user=user)
-
     with transaction.atomic():
+        user = tokens.redeem(token, TokenPurpose.ACCOUNT_ACTIVATION)
+        user = User.objects.select_for_update().get(pk=user.pk)
+        if user.status != Status.PENDING_ACTIVATION:
+            raise tokens.InvalidToken
+        validate_password(norm_password, user=user)
+
         user.set_password(norm_password)
         user.status = Status.ACTIVE
         user.password_changed_at = clock.now()
