@@ -1,0 +1,5 @@
+# SAST de la CI (trabajo `static`; Principio V). Se instala en un entorno virtual aparte para que
+# sus dependencias no choquen con las de requirements*.txt. Regenerar con:
+#   uv pip compile requirements-sast.in --generate-hashes --python-version 3.13 \
+#     --python-platform x86_64-manylinux_2_34 -o requirements-sast.txt
+semgrep

@@ -66,7 +66,9 @@ def test_not_due_messages_wait(make_user, test_handler, clock):
     assert outbox.deliver_due() == {"sent": 0, "retry": 0, "failed": 0}
 
 
-def test_missing_handler_is_a_delivery_failure(make_user):
+def test_missing_handler_is_a_delivery_failure(make_user, monkeypatch):
+    # Se quita el handler solo durante la prueba: no depende de qué historias ya registraron uno.
+    monkeypatch.delitem(outbox._HANDLERS, "mfa_reset_notice", raising=False)
     outbox.enqueue("mfa_reset_notice", make_user())
     stats = outbox.deliver_due()
     assert stats["retry"] == 1 and len(mail.outbox) == 0

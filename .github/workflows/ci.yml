@@ -18,8 +18,15 @@ jobs:
         with: { python-version: "3.13" }
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
+      # Semgrep va en su propio entorno virtual y con hashes (requirements-sast.txt): mezclarlo sin
+      # versión en el mismo `pip install` que un archivo con hashes hace fallar a pip.
       - name: Herramientas de análisis
-        run: pip install --require-hashes -r backend/requirements.txt && pip install -r backend/requirements-dev.txt semgrep
+        run: |
+          pip install --require-hashes -r backend/requirements.txt
+          pip install --require-hashes -r backend/requirements-dev.txt
+          python -m venv "$RUNNER_TEMP/sast"
+          "$RUNNER_TEMP/sast/bin/pip" install --require-hashes -r backend/requirements-sast.txt
+          echo "$RUNNER_TEMP/sast/bin" >> "$GITHUB_PATH"
       - name: SAST — Semgrep
         run: semgrep scan --error --config p/django --config p/python --config p/react --config p/secrets --config .semgrep/
       - name: SAST — Bandit
