@@ -92,6 +92,8 @@ jobs:
     needs: [static, unit, integration]
     env:
       SECUREFIN_STACK_URL: https://securefin.local
+      # Cuenta pendiente que crea iam_bootstrap_admin para la E2E de activación (T135)
+      SECUREFIN_E2E_ACTIVATION_EMAIL: e2e-admin@lab.securefin.local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -133,6 +135,10 @@ jobs:
             -e SECUREFIN_STACK_URL -e MAILPIT_API_USER -e MAILPIT_API_PASSWORD \
             -v "$PWD/backend/tests:/app/tests:ro" -v "$PWD/infra:/infra:ro" backend \
             sh -c "pip install --quiet pytest pytest-django && pytest -m stack -p no:cacheprovider"
+      - name: Cuenta pendiente de activación para la E2E (bootstrap por consola, FR-022)
+        run: |
+          docker compose -f infra/compose.yaml exec -T backend \
+            python manage.py iam_bootstrap_admin --email "$SECUREFIN_E2E_ACTIVATION_EMAIL" --name "Admin E2E"
       - name: Pruebas E2E (Playwright; sin trazas, vídeos, capturas ni artefactos)
         working-directory: frontend
         run: npm ci && npx playwright install --with-deps chromium && npx playwright test

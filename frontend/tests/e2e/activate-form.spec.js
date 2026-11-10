@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mailpit } from "./fixtures/mailpit.js";
+import { totp } from "./fixtures/totp.js";
 
 // TS-E02 (T135): Formulario de activación (/activate#token=...) compatible con gestores de contraseñas.
 // Verificación del fragmento en memoria, atributos seguros y consumo de un solo uso.
@@ -55,8 +56,69 @@ test.describe("formulario de activación (/activate)", () => {
 
   test("el fragmento #token se limpia tras cargar mediante history.replaceState", async ({ page }) => {
     await page.goto(`/activate#token=${dummyToken}`);
-    const hash = await page.evaluate(() => window.location.hash);
-    expect(hash).toBe("");
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("");
+    // El token no queda en ningún almacenamiento del navegador
+    const stored = await page.evaluate(() => JSON.stringify({ ...window.localStorage, ...window.sessionStorage }));
+    expect(stored.includes(dummyToken)).toBe(false);
+  });
+
+  // Flujo real con el token del correo (FR-021, FR-022, FR-025). La cuenta pendiente la crea
+  // `iam_bootstrap_admin` en el paso del CI anterior a Playwright; su correo llega en
+  // SECUREFIN_E2E_ACTIVATION_EMAIL. Si falta, la prueba FALLA (U2). El token se consume aquí, el
+  // mensaje se borra al final y ni el token ni la clave TOTP se imprimen ni se guardan.
+  test("el envío consume el token real y activa la cuenta; un segundo uso falla; luego login y alta de MFA", async ({
+    page,
+  }) => {
+    const email = process.env.SECUREFIN_E2E_ACTIVATION_EMAIL;
+    expect(email, "SECUREFIN_E2E_ACTIVATION_EMAIL no está definida").toBeTruthy();
+    const message = await mailpit.waitForMessage({ to: email, subject: "Activa tu cuenta" });
+    try {
+      const token = await mailpit.extractToken(message.ID);
+      const password = "frase de activación e2e muy larga 2026";
+
+      const activate = async () => {
+        await page.goto("about:blank"); // carga completa: un cambio solo de fragmento no remonta la página
+        await page.goto(`/activate#token=${token}`);
+        await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("");
+        await page.locator("#activate-password").fill(password);
+        await page.locator("#activate-password-confirm").fill(password);
+        const [response] = await Promise.all([
+          page.waitForResponse((r) => r.url().endsWith("/api/v1/auth/activate")),
+          page.locator('#activate-form button[type="submit"]').click(),
+        ]);
+        return response.status();
+      };
+
+      expect(await activate()).toBe(204);
+      await expect(page.getByText("Cuenta activada")).toBeVisible();
+      expect(await activate()).toBe(400);
+      await expect(page.getByRole("alert")).toContainText("no es válido o ha caducado");
+
+      // Con la contraseña recién fijada, el Administrador entra y debe dar de alta el MFA (FR-022/025)
+      await page.goto("/login");
+      await page.locator("#login-email").fill(email);
+      await page.locator("#login-password").fill(password);
+      await page.locator('#login-form button[type="submit"]').click();
+      await expect(page).toHaveURL(/\/login\/enroll$/);
+      await page.locator('#enroll-start button[type="submit"]').click();
+      const secret = (await page.locator("section code").innerText()).replace(/\s/g, "");
+      await page.locator("#enroll-code").fill(totp(secret));
+      await page.locator('#enroll-confirm button[type="submit"]').click();
+      await expect(page.locator("#enroll-confirm")).toHaveCount(0); // se muestran los códigos de recuperación
+
+      const session = await page.evaluate(async () => {
+        const r = await fetch("/api/v1/auth/session", { credentials: "same-origin" });
+        const body = await r.json().catch(() => ({}));
+        return { status: r.status, role: body.user?.role, mfaEnabled: body.user?.mfa_enabled };
+      });
+      expect(session.status).toBe(200);
+      expect(session.role).toBe("admin");
+      expect(session.mfaEnabled).toBe(true);
+      const stored = await page.evaluate(() => window.localStorage.length + window.sessionStorage.length);
+      expect(stored).toBe(0);
+    } finally {
+      await mailpit.deleteMessages([message.ID]);
+    }
   });
 });
 
