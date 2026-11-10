@@ -29,8 +29,10 @@ jobs:
       - name: SCA — npm audit
         working-directory: frontend
         run: npm ci --ignore-scripts && npm audit --omit=dev --audit-level=high
+      # Fijado por SHA: upstream retiró las etiquetas sin prefijo «v» (p. ej. 0.28.0) y
+      # setup-trivy v0.2.1, del que dependían. v0.36.0 = Trivy v0.70.0.
       - name: Archivos y secretos — Trivy fs
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scanners: misconfig,secret
@@ -128,7 +130,7 @@ jobs:
         working-directory: frontend
         run: npm ci && npx playwright install --with-deps chromium && npx playwright test
       - name: Trivy — imágenes
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: securefin-backend:lab
           severity: HIGH,CRITICAL
