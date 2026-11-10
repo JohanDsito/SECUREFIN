@@ -1,0 +1,148 @@
+# E3 — Reconocimiento y escaneo (Semana 8) — 2026-11-10T06:58Z
+Objetivo: el host que publica el stack (host.docker.internal). Puertos: web (80/443), Mailpit (8025),
+backend (8000), PostgreSQL (5432), SMTP de Mailpit (1025) y otros habituales (22, 3306, 8080).
+
+$ docker run --rm instrumentisto/nmap:7.95 -sV -Pn -p 22,80,443,1025,3306,5432,8000,8025,8080 --script vuln host.docker.internal
+Nmap scan report for host.docker.internal (192.168.65.254)
+Host is up (0.0054s latency).
+Other addresses for host.docker.internal (not scanned): fdc4:f303:9324::254
+
+PORT     STATE  SERVICE    VERSION
+22/tcp   closed ssh
+80/tcp   open   http       nginx
+|_http-stored-xss: Couldn't find any stored XSS vulnerabilities.
+|_http-dombased-xss: Couldn't find any DOM based XSS.
+|_http-csrf: Couldn't find any CSRF vulnerabilities.
+443/tcp  open   ssl/http   nginx
+|_http-dombased-xss: Couldn't find any DOM based XSS.
+|_http-majordomo2-dir-traversal: ERROR: Script execution failed (use -d to debug)
+|_http-csrf: Couldn't find any CSRF vulnerabilities.
+| http-vuln-cve2011-3192:
+|   VULNERABLE:
+|   Apache byterange filter DoS
+|     State: VULNERABLE
+|     IDs:  BID:49303  CVE:CVE-2011-3192
+|       The Apache web server is vulnerable to a denial of service attack when numerous
+|       overlapping byte ranges are requested.
+|     Disclosure date: 2011-08-19
+|     References:
+|       https://www.tenable.com/plugins/nessus/55976
+|       https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2011-3192
+|       https://www.securityfocus.com/bid/49303
+|_      https://seclists.org/fulldisclosure/2011/Aug/175
+|_http-stored-xss: Couldn't find any stored XSS vulnerabilities.
+|_http-vuln-cve2017-1001000: ERROR: Script execution failed (use -d to debug)
+1025/tcp closed NFS-or-IIS
+3306/tcp open   mysql?
+| fingerprint-strings:
+|   DNSStatusRequestTCP:
+|     9.3.0
+|     iuBWZ
+|     {.yOX
+|     caching_sha2_password
+|     #08S01Got packets out of order
+|   DNSVersionBindReqTCP:
+|     9.3.0
+|     `w%Ay8
+|     caching_sha2_password
+|     #08S01Got packets out of order
+|   GenericLines:
+|     9.3.0
+|     (E&"
+|     caching_sha2_password
+|     #08S01Got packets out of order
+|   GetRequest:
+|     9.3.0
+|     ~`~-
+|     '0jk!N
+|     caching_sha2_password
+|     #08S01Got packets out of order
+|   HTTPOptions:
+|     9.3.0
+|     SU5r
+|     Gm@S
+|     caching_sha2_password
+|     #08S01Got packets out of order
+|   Help:
+|     9.3.0
+|     f?:b"5:tJ5_[
+|     caching_sha2_password
+|     #08S01Got packets out of order
+|   NULL:
+|     9.3.0
+|     (E&"
+|     caching_sha2_password
+|   RPCCheck:
+|     9.3.0
+|     doC8h88Q
+|     H8aU)5cw
+|     caching_sha2_password
+|     #08S01Got packets out of order
+|   RTSPRequest:
+|     9.3.0
+|     6e>|[
+|     caching_sha2_password
+|     #08S01Got packets out of order
+|   SSLSessionReq:
+|     9.3.0
+|     d2NA!.CK|
+|     caching_sha2_password
+|_    #08S01Got packets out of order
+5432/tcp open   postgresql PostgreSQL DB (Spanish)
+8000/tcp closed http-alt
+8025/tcp open   ssl/http   nginx
+|_http-dombased-xss: Couldn't find any DOM based XSS.
+|_http-stored-xss: Couldn't find any stored XSS vulnerabilities.
+|_http-csrf: Couldn't find any CSRF vulnerabilities.
+8080/tcp closed http-proxy
+SF-Port3306-TCP:V=7.95%I=7%D=11/10%Time=6AF2C0BD%P=x86_64-unknown-linux-gn
+SF:u%r(NULL,4D,"I\0\0\0\n9\.3\.0\0\n\0\0\0fJ\x1e\x1d_\x03C\|\0\xff\xff\xff
+SF:\x02\0\xff\xdf\x15\0\0\0\0\0\0\0\0\0\0\.\x04\(E&\"\x0ec4N\x15\t\0cachin
+SF:g_sha2_password\0")%r(GenericLines,72,"I\0\0\0\n9\.3\.0\0\n\0\0\0fJ\x1e
+SF:\x1d_\x03C\|\0\xff\xff\xff\x02\0\xff\xdf\x15\0\0\0\0\0\0\0\0\0\0\.\x04\
+SF:(E&\"\x0ec4N\x15\t\0caching_sha2_password\0!\0\0\x01\xff\x84\x04#08S01G
+SF:ot\x20packets\x20out\x20of\x20order")%r(GetRequest,72,"I\0\0\0\n9\.3\.0
+SF:\0\x0b\0\0\0kzO\x08~`~-\0\xff\xff\xff\x02\0\xff\xdf\x15\0\0\0\0\0\0\0\0
+SF:\0\0U\x01M'J\x07'0jk!N\0caching_sha2_password\0!\0\0\x01\xff\x84\x04#08
+SF:S01Got\x20packets\x20out\x20of\x20order")%r(HTTPOptions,72,"I\0\0\0\n9\
+SF:.3\.0\0\x0c\0\0\0\*\t\x1fSU5r\x11\0\xff\xff\xff\x02\0\xff\xdf\x15\0\0\0
+SF:\0\0\0\0\0\0\0`\x1fGm@S\x1aJO\x01\x1aF\0caching_sha2_password\0!\0\0\x0
+SF:1\xff\x84\x04#08S01Got\x20packets\x20out\x20of\x20order")%r(RTSPRequest
+SF:,72,"I\0\0\0\n9\.3\.0\0\r\0\0\0\x056e>\|\[\x11X\0\xff\xff\xff\x02\0\xff
+SF:\xdf\x15\0\0\0\0\0\0\0\0\0\0JG\*\x1cD\x05\x11M7\x10\x14-\0caching_sha2_
+SF:password\0!\0\0\x01\xff\x84\x04#08S01Got\x20packets\x20out\x20of\x20ord
+SF:er")%r(RPCCheck,72,"I\0\0\0\n9\.3\.0\0\x0e\0\0\0doC8h88Q\0\xff\xff\xff\
+SF:x02\0\xff\xdf\x15\0\0\0\0\0\0\0\0\0\0\x16H8aU\)5cw\x1b&\x1d\0caching_sh
+SF:a2_password\0!\0\0\x01\xff\x84\x04#08S01Got\x20packets\x20out\x20of\x20
+SF:order")%r(DNSVersionBindReqTCP,72,"I\0\0\0\n9\.3\.0\0\x0f\0\0\0\x0fq\x1
+SF:6\x15\^-\x1f_\0\xff\xff\xff\x02\0\xff\xdf\x15\0\0\0\0\0\0\0\0\0\0K:;\x1
+SF:7`w%Ay8\x0f@\0caching_sha2_password\0!\0\0\x01\xff\x84\x04#08S01Got\x20
+SF:packets\x20out\x20of\x20order")%r(DNSStatusRequestTCP,72,"I\0\0\0\n9\.3
+SF:\.0\0\x10\0\0\x008\x03iuBWZ\x10\0\xff\xff\xff\x02\0\xff\xdf\x15\0\0\0\0
+SF:\0\0\0\0\0\0{\.yOX\x17xU\x01&\x1bz\0caching_sha2_password\0!\0\0\x01\xf
+SF:f\x84\x04#08S01Got\x20packets\x20out\x20of\x20order")%r(Help,72,"I\0\0\
+SF:0\n9\.3\.0\0\x11\0\0\0c\x03jk6\x13\r\r\0\xff\xff\xff\x02\0\xff\xdf\x15\
+SF:0\0\0\0\0\0\0\0\0\0f\?:b\"5:tJ5_\[\0caching_sha2_password\0!\0\0\x01\xf
+SF:f\x84\x04#08S01Got\x20packets\x20out\x20of\x20order")%r(SSLSessionReq,7
+SF:2,"I\0\0\0\n9\.3\.0\0\x12\0\0\0O,\x11d=x\x017\0\xff\xff\xff\x02\0\xff\x
+SF:df\x15\0\0\0\0\0\0\0\0\0\0\.\x01\x02d2NA!\.CK\|\0caching_sha2_password\
+SF:0!\0\0\x01\xff\x84\x04#08S01Got\x20packets\x20out\x20of\x20order");
+
+
+## Análisis de los resultados
+
+| Hallazgo | Análisis | Acción |
+|---|---|---|
+| 80 y 443: nginx, sin versión | `server_tokens off` oculta la versión (banner grabbing mitigado). 80 solo redirige a HTTPS | Ninguna |
+| 8000 (backend) y 1025 (SMTP de Mailpit): cerrados | Backend, base de datos y Mailpit están en redes internas de Docker sin puertos publicados: solo Nginx es alcanzable (zona DMZ, denegar por defecto) | Ninguna |
+| 8025 abierto | En Windows escucha solo en 127.0.0.1 (proxy TLS de Mailpit con Basic Auth). Nmap llega porque escanea desde dentro de la red virtual de Docker; desde la LAN no es accesible | Ninguna |
+| 3306 (MySQL 9.3.0) y 5432 (PostgreSQL) abiertos | **No pertenecen a SecureFin**: son servicios instalados en el Windows del equipo (mysqld y postgres), escuchando en todas las interfaces. Exposición del equipo, no de la aplicación | Detenerlos o filtrarlos con el firewall de Windows antes de la demo |
+| CVE-2011-3192 "VULNERABLE" en 443 | **Falso positivo de producto** (es un fallo de Apache), pero el script lo detecta porque Nginx devolvía `206 multipart/byteranges` con 11 rangos disjuntos: amplificación útil para un DoS | **Corregido** con `max_ranges 1;` en nginx.conf. Verificado abajo |
+| XSS / CSRF (http-stored-xss, http-dombased-xss, http-csrf) | Sin hallazgos (CSP estricta, CSRF obligatorio en la API) | Ninguna |
+
+## Verificación tras la corrección (max_ranges 1)
+$ docker run --rm instrumentisto/nmap:7.95 -Pn -p 443 --script http-vuln-cve2011-3192 host.docker.internal
+443/tcp open  https
+(sin salida "VULNERABLE": el script ya no detecta la condición)
+$ curl -I -H "Range: bytes=0-0,2-2,...,20-20" https://127.0.0.1/assets/<js>   → HTTP/1.1 200 OK (antes: 206 multipart/byteranges)
+$ curl -I -H "Range: bytes=0-99"            https://127.0.0.1/assets/<js>   → HTTP/1.1 206 Partial Content (un rango sigue funcionando)

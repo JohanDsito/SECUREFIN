@@ -1,0 +1,37 @@
+# E9 — Análisis de tráfico: HTTP en claro frente a HTTPS/TLS (Semana 2) — 2026-11-10T07:31Z
+Captura con tshark (Wireshark) en el adaptador Npcap Loopback. Se envían las MISMAS credenciales FICTICIAS
+por HTTP (puerto 80) y por HTTPS (puerto 443). Sin archivo .pcapng en el repositorio: solo este resumen.
+
+## 1. Paquetes capturados (origen → destino | protocolo | información)
+$ tshark -i "\Device\NPF_Loopback" -Y "(tcp.port == 80 && http) || (tcp.port == 443 && tls)"
+  64131 → 80    | HTTP/JSON | POST /api/v1/auth/login HTTP/1.1 , JSON (application/json)
+     80 → 64131 | HTTP      | HTTP/1.1 301 Moved Permanently  (text/html)
+  64132 → 443   | TLSv1     | Client Hello (SNI=securefin.local)
+    443 → 64132 | TLSv1.3   | Server Hello, Change Cipher Spec, Application Data, Application Data, Application Data, Application Data
+  64132 → 443   | TLSv1.3   | Change Cipher Spec, Application Data
+  64132 → 443   | TLSv1.3   | Application Data
+    443 → 64132 | TLSv1.3   | Application Data
+    443 → 64132 | TLSv1.3   | Application Data
+    443 → 64132 | TLSv1.3   | Application Data
+  64132 → 443   | TLSv1.3   | Application Data
+
+## 2. Contenido de la petición por HTTP (puerto 80), decodificado: EN CLARO
+  {"email":"demo-wireshark@lab.securefin.local","password":"ClaveFicticia-Wireshark-2026"}
+
+## 3. Por HTTPS (puerto 443) solo es visible:
+  - el SNI del saludo TLS: securefin.local
+  - registros 'Application Data' de TLS 1.3, cifrados (TLS_AES_256_GCM_SHA384, ver E2)
+
+## 4. Búsqueda de la contraseña ficticia dentro de los paquetes
+$ tshark -i "\Device\NPF_Loopback" -Y 'frame contains "ClaveFicticia"' -T fields -e tcp.srcport -e tcp.dstport
+  (ejecución separada con las mismas dos peticiones: dos capturas simultáneas en Windows se interfieren)
+  Puerto 80  → 1 paquete(s) con la contraseña legible
+  Puerto 443 → 0 paquete(s) con la contraseña legible
+
+## Lectura
+- Por HTTP la contraseña viaja legible ANTES de que Nginx responda 301: cualquiera en la misma red (Wi-Fi
+  abierta, ARP spoofing, DPI) la captura. La redirección llega tarde para esa petición.
+- Por HTTPS el atacante solo ve a qué servidor se conecta (SNI) y cuánto se transmite; el contenido va
+  cifrado y autenticado con TLS 1.3: confidencialidad e integridad frente a un MITM.
+- Por eso SecureFin envía Strict-Transport-Security (HSTS): tras la primera visita el navegador ya no usa
+  HTTP, y el SPA llama a la API solo por https en el mismo origen.
