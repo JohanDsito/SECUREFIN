@@ -43,6 +43,11 @@ export default function Home() {
       <p>
         <Link to="/profile">Mi perfil</Link> · <Link to="/sessions">Mis sesiones</Link>
       </p>
+      {user.role === "admin" && (
+        <p>
+          Administración: <Link to="/admin/users">Usuarios</Link> · <Link to="/admin/mfa-resets">Reinicios de MFA</Link>
+        </p>
+      )}
       <button type="button" onClick={logout}>Cerrar sesión</button>
     </section>
   );
