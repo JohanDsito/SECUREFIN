@@ -1,4 +1,6 @@
-import { Link, Route, Routes } from "react-router";
+import { Route, Routes } from "react-router";
+import Header from "./components/Header.jsx";
+import SecurityCenter from "./pages/SecurityCenter.jsx";
 import Register from "./pages/Register.jsx";
 import Login from "./pages/Login.jsx";
 import Home from "./pages/Home.jsx";
@@ -22,23 +24,11 @@ import Approvals from "./pages/finance/admin/Approvals.jsx";
 export default function App() {
   return (
     <div className="app">
-      <header>
-        <Link className="brand" to="/" aria-label="SecureFin Gateway, inicio">
-          <span className="brand-mark" aria-hidden="true">S</span>
-          <span className="brand-copy">
-            <strong>SecureFin <span>Gateway</span></strong>
-            <small>Seguridad · Fintech simulada</small>
-          </span>
-        </Link>
-        <nav aria-label="Navegación principal">
-          <span className="environment-badge"><span aria-hidden="true" />Laboratorio académico</span>
-          <Link className="nav-link" to="/login">Iniciar sesión</Link>
-          <Link className="nav-cta" to="/register">Crear cuenta</Link>
-        </nav>
-      </header>
+      <Header />
       <main>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/seguridad" element={<SecurityCenter />} />
           <Route path="/register" element={<Register />} />
           <Route path="/login" element={<Login />} />
           <Route path="/login/mfa" element={<MfaStep />} />
@@ -60,6 +50,10 @@ export default function App() {
           <Route path="*" element={<p>Página no encontrada.</p>} />
         </Routes>
       </main>
+      <footer className="app-footer">
+        <span>SecureFin · Proyecto académico de ciberseguridad. Saldos y operaciones 100 % ficticios.</span>
+        <span>TLS 1.2/1.3 · Argon2id · AES-256-GCM · MFA TOTP · Rate limiting</span>
+      </footer>
     </div>
   );
 }

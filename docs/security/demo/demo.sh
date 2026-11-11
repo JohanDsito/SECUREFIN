@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Demo en vivo de SecureFin Gateway (Git Bash en Windows, con el stack levantado).
 #   bash docs/security/demo/demo.sh <tema>
-# Temas: estado cabeceras tls cripto red privilegios nmap sqli dos fuerzabruta auditoria trivy todo
+# Temas: estado cabeceras tls cripto red privilegios nmap sqli juiceshop dos fuerzabruta auditoria trivy todo
 # Solo usa credenciales FICTICIAS. No imprime cookies, tokens ni contraseñas reales.
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
@@ -9,7 +9,10 @@ cd "$(dirname "$0")/../../.." || exit 1
 docker() { MSYS_NO_PATHCONV=1 command docker "$@"; }
 
 B="https://securefin.local/api/v1"
-CURL=(curl -sk --ssl-no-revoke)
+# Si no se pudo editar el archivo hosts (equipo sin permisos de administrador), curl fuerza
+# securefin.local → 127.0.0.1 por su cuenta.
+RES=(); getent hosts securefin.local >/dev/null 2>&1 || ping -n 1 -w 500 securefin.local >/dev/null 2>&1   || RES=(--resolve securefin.local:443:127.0.0.1 --resolve securefin.local:80:127.0.0.1)
+CURL=(curl -sk --ssl-no-revoke "${RES[@]}")
 JAR="$(mktemp)"; trap 'rm -f "$JAR" /tmp/sf-demo.*' EXIT
 
 title() { printf '\n\033[1;36m=== %s ===\033[0m\n' "$*"; }
@@ -33,7 +36,7 @@ cabeceras() {
   "${CURL[@]}" -I https://securefin.local/ | tr -d '\r' | grep -E "^HTTP|^Server|X-Frame|X-Content|Strict-Transport|Content-Security|Referrer|Cache-Control"
   note "Server: nginx SIN versión (server_tokens off)"
   title "HTTP plano solo redirige a HTTPS"
-  curl -s -I http://securefin.local/ | tr -d '\r' | grep -E "^HTTP|^Location"
+  curl -s "${RES[@]}" -I http://securefin.local/ | tr -d '\r' | grep -E "^HTTP|^Location"
   title "Métodos peligrosos bloqueados (TRACE)"
   "${CURL[@]}" -I -X TRACE https://securefin.local/ | tr -d '\r' | head -1
 }
@@ -115,6 +118,21 @@ sqli() {
   echo "Usuarios en la tabla tras el DROP TABLE: $(psql_ro 'SELECT count(*) FROM iam_user;')"
 }
 
+juiceshop() {
+  title "Semana 8 — La MISMA inyección SQL: OWASP Juice Shop (vulnerable) vs SecureFin (protegido)"
+  if ! curl -s -o /dev/null -m 3 http://127.0.0.1:3000/; then
+    note "Juice Shop no está levantado: bash scripts/setup.sh pentest   (espera ~30 s y repite)"; return
+  fi
+  printf 'Juice Shop  email=%-16s → ' "' OR 1=1 --"
+  curl -s -m 10 -X POST http://127.0.0.1:3000/rest/user/login -H "Content-Type: application/json" \
+    --data "{\"email\":\"' OR 1=1 --\",\"password\":\"x\"}" -w ' [%{http_code}]' \
+    | sed -E 's/"token":"[^"]{12}[^"]*"/"token":"<JWT de ADMINISTRADOR oculto>"/' | head -c 220; echo
+  note "Juice Shop concatena el texto en el SQL: el login devuelve un token del PRIMER usuario (admin)"
+  printf 'SecureFin   email=%-16s → ' "' OR 1=1 --"
+  post /auth/login "{\"email\":\"' OR 1=1 --\",\"password\":\"x\"}"
+  note "SecureFin usa el ORM (consulta parametrizada): el payload es solo un correo inválido → 401 genérico"
+}
+
 dos() {
   title "Semanas 9 y 10 — Inundación HTTP (Apache Benchmark) contra Nginx"
   note "Mientras corre, recarga https://securefin.local en el navegador: sigue respondiendo"
@@ -158,7 +176,7 @@ trivy() {
 }
 
 case "${1:-}" in
-  estado|cabeceras|tls|cripto|red|privilegios|nmap|sqli|dos|fuerzabruta|auditoria|trivy) "$1" ;;
+  estado|cabeceras|tls|cripto|red|privilegios|nmap|sqli|juiceshop|dos|fuerzabruta|auditoria|trivy) "$1" ;;
   todo) estado; cabeceras; tls; cripto; red; privilegios; sqli; auditoria ;;
-  *) echo "Uso: bash docs/security/demo/demo.sh <estado|cabeceras|tls|cripto|red|privilegios|nmap|sqli|dos|fuerzabruta|auditoria|trivy|todo>"; exit 1 ;;
+  *) echo "Uso: bash docs/security/demo/demo.sh <estado|cabeceras|tls|cripto|red|privilegios|nmap|sqli|juiceshop|dos|fuerzabruta|auditoria|trivy|todo>"; exit 1 ;;
 esac

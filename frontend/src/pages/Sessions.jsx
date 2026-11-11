@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../api/client.js";
+import { describeUserAgent, formatDate } from "../lib/labels.jsx";
 
 // Sesiones propias (T065; US2, FR-010). Lista las sesiones vigentes y permite revocar cualquiera de
 // las otras; la revocación es inmediata en el servidor (la otra cookie deja de valer). La sesión
@@ -38,7 +39,9 @@ export default function Sessions() {
   }
   return (
     <section>
+      <p className="finance-eyebrow">Sesiones de servidor · revocación inmediata</p>
       <h1>Mis sesiones</h1>
+      <p>Cada fila es una sesión guardada en el servidor. Si no reconoces una, ciérrala: su cookie deja de valer al instante.</p>
       {message && <p role="status">{message}</p>}
       <table>
         <thead>
@@ -53,13 +56,13 @@ export default function Sessions() {
         <tbody>
           {state.sessions.map((s) => (
             <tr key={s.public_id}>
-              <td>{new Date(s.created_at).toLocaleString()}</td>
-              <td>{new Date(s.last_activity_at).toLocaleString()}</td>
+              <td>{formatDate(s.created_at)}</td>
+              <td>{formatDate(s.last_activity_at)}</td>
               <td>{s.ip_address ?? "—"}</td>
-              <td>{s.user_agent ?? "—"}</td>
+              <td title={s.user_agent ?? ""}>{describeUserAgent(s.user_agent)}</td>
               <td>
                 {s.current ? (
-                  <strong>Esta sesión</strong>
+                  <span className="pill pill--ok">Esta sesión</span>
                 ) : (
                   <button type="button" onClick={() => revoke(s.public_id)}>
                     Cerrar

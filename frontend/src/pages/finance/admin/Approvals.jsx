@@ -60,7 +60,7 @@ export default function Approvals() {
     } catch (requestError) {
       setError(
         requestError.status === 409
-          ? "La solicitud ya fue resuelta o tus detalles requieren revisión."
+          ? requestError.message || "La solicitud ya fue resuelta o tus detalles requieren revisión."
           : "No se pudo registrar la decisión.",
       );
     } finally {

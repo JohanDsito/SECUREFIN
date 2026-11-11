@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { ApiError, api } from "../../api/client.js";
+import ClientOnly from "../../components/finance/ClientOnly.jsx";
 import AccountCard from "../../components/finance/AccountCard.jsx";
+import { KIND_LABEL, StatusPill } from "../../lib/labels.jsx";
 
 const currencyLabels = { COP: "Pesos colombianos", USD: "Dólares estadounidenses" };
 
@@ -14,13 +16,14 @@ function formatAmount(amountMinor, currency) {
 }
 
 export default function Dashboard() {
-  const [state, setState] = useState({ loading: true, data: null, error: null });
+  const [state, setState] = useState({ loading: true, data: null, error: null, forbidden: false });
 
   useEffect(() => {
     api("/finance/dashboard")
       .then((data) => setState({ loading: false, data, error: null }))
       .catch((error) =>
         setState({
+          forbidden: error instanceof ApiError && error.status === 403,
           loading: false,
           data: null,
           error:
@@ -32,6 +35,7 @@ export default function Dashboard() {
   }, []);
 
   if (state.loading) return <p role="status">Cargando tu panel financiero…</p>;
+  if (state.forbidden) return <ClientOnly />;
   if (!state.data) {
     return (
       <section className="finance-page">
@@ -111,9 +115,9 @@ export default function Dashboard() {
               <span className="finance-activity-mark" aria-hidden="true">↗</span>
               <div>
                 <strong>
-                  {item.kind === "opening_credit" ? "Saldo ficticio inicial" : "Transferencia simulada"}
+                  {KIND_LABEL[item.kind] ?? item.kind}
                 </strong>
-                <small>{new Date(item.created_at).toLocaleString("es-CO")} · {item.status}</small>
+                <small>{new Date(item.created_at).toLocaleString("es-CO")} <StatusPill status={item.status} /></small>
               </div>
               <span className="finance-activity-amount">
                 {formatAmount(item.amount_minor, item.currency)}

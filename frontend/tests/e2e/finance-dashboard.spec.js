@@ -63,7 +63,9 @@ test("muestra saldos ficticios y permite abrir y consultar una cuenta adicional"
   await expect(page.getByText(/5\.000\.000/).first()).toBeVisible();
 
   await page.getByRole("link", { name: /Abrir cuenta/ }).first().click();
-  await page.getByLabel("Moneda").selectOption("USD");
+  // Esperar la navegación: "Saldos por moneda" del panel también coincide con getByLabel("Moneda")
+  await expect(page).toHaveURL(/\/finance\/accounts\/new$/);
+  await page.getByLabel("Moneda", { exact: true }).selectOption("USD");
   await page.getByLabel("Tipo de cuenta").selectOption("checking");
   await page.getByRole("button", { name: "Abrir cuenta de demostración" }).click();
 

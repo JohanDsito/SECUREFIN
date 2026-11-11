@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { api } from "../api/client.js";
 
 // Inicio de sesión (T056; FR-005, FR-009; U1). Email con autocomplete="username" y contraseña con
@@ -33,6 +33,7 @@ export default function Login() {
   }
 
   return (
+    <div className="auth-layout">
     <form id="login-form" name="login" method="post" onSubmit={onSubmit} noValidate>
       <h1>Iniciar sesión</h1>
       <label htmlFor="login-email">Correo</label>
@@ -40,7 +41,19 @@ export default function Login() {
       <label htmlFor="login-password">Contraseña</label>
       <input id="login-password" name="password" type="password" autoComplete="current-password" maxLength={128} required />
       {message && <p role="alert">{message}</p>}
-      <button type="submit" disabled={busy}>Entrar</button>
+      <button type="submit" disabled={busy}>{busy ? "Verificando…" : "Entrar"}</button>
+      <p className="auth-switch">¿Aún no tienes cuenta? <Link to="/register">Ábrela gratis</Link></p>
     </form>
+    <aside className="auth-aside">
+      <p className="finance-eyebrow">Qué pasa al pulsar «Entrar»</p>
+      <ol>
+        <li><strong>TLS 1.3</strong> cifra la contraseña en el camino (Semana 2).</li>
+        <li>El servidor la compara con un hash <strong>Argon2id</strong> con salt (Semana 1).</li>
+        <li>Si eres Administrador o Auditor, pide tu código <strong>TOTP</strong> (Semana 4).</li>
+        <li>Cualquier fallo da el <strong>mismo mensaje</strong>: no revela si el correo existe.</li>
+        <li>Tras 5 fallos la cuenta entra en <strong>retraso progresivo</strong> y la IP en 429 (Semana 10).</li>
+      </ol>
+    </aside>
+    </div>
   );
 }

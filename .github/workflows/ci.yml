@@ -129,12 +129,12 @@ jobs:
         run: docker compose -f infra/compose.yaml --profile oneoff run --rm migrate
       - name: Resto del stack y espera de healthchecks
         run: docker compose -f infra/compose.yaml up -d --build --wait
-      - name: Pruebas del stack (marcador stack)
-        run: |
-          docker compose -f infra/compose.yaml run --rm \
-            -e SECUREFIN_STACK_URL -e MAILPIT_API_USER -e MAILPIT_API_PASSWORD \
-            -v "$PWD/backend/tests:/app/tests:ro" -v "$PWD/infra:/infra:ro" backend \
-            sh -c "pip install --quiet pytest pytest-django && pytest -m stack -p no:cacheprovider"
+      # Antes: `pip install pytest` dentro del contenedor del backend. No podía funcionar: la imagen
+      # no trae pip (hardening) y el backend está en redes internas sin salida a Internet. Ahora se
+      # comprueban los controles desde fuera, como un atacante: cabeceras, banner, TLS, 301, TRACE,
+      # inyección SQL y rate limiting (429).
+      - name: Prueba de humo de los controles de seguridad del stack
+        run: bash scripts/smoke-stack.sh
       - name: Cuenta pendiente de activación para la E2E (bootstrap por consola, FR-022)
         run: |
           docker compose -f infra/compose.yaml exec -T backend \
@@ -142,12 +142,30 @@ jobs:
       - name: Pruebas E2E (Playwright; sin trazas, vídeos, capturas ni artefactos)
         working-directory: frontend
         run: npm ci && npx playwright install --with-deps chromium && npx playwright test
-      - name: Trivy — imágenes
+      # ignore-unfixed: el pipeline falla por toda CVE HIGH/CRITICAL que YA tenga parche (hay que
+      # actualizar). Las que Debian aún no ha corregido (47 en python:3.13-slim / Debian 13) no se
+      # pueden arreglar actualizando: se aceptan como riesgo documentado (docs/security/README.md,
+      # "Riesgos abiertos") y se listan en el paso informativo siguiente para vigilarlas.
+      - name: Trivy — imagen del backend (CVE con parche disponible)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: securefin-backend:lab
           severity: HIGH,CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
+      - name: Trivy — imagen de Nginx (CVE con parche disponible)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: securefin-nginx:lab
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Trivy — informe de CVE sin parche (riesgo aceptado, no bloquea)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: securefin-backend:lab
+          severity: HIGH,CRITICAL
+          exit-code: "0"
       # Limpieza SIEMPRE, también si algo falla. No hay ningún actions/upload-artifact en este
       # trabajo: test-results/, playwright-report/, trazas y capturas nunca se suben (U1).
       - name: Limpieza (mensajes de Mailpit, volúmenes, secretos y salidas de prueba)

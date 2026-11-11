@@ -66,7 +66,13 @@ def exception_handler(exc, context):
     elif isinstance(exc, exceptions.MethodNotAllowed):
         error = {"code": "method_not_allowed", "message": "Método no permitido."}
     else:
+        # Las vistas financieras levantan APIException(detail={"detail": "..."}): se extrae el texto y
+        # el código anidados en lugar de publicar el repr del diccionario ("{'detail': ErrorDetail(…)}").
         codes = exc.get_codes() if hasattr(exc, "get_codes") else "error"
-        error = {"code": codes if isinstance(codes, str) else "error", "message": str(getattr(exc, "detail", exc))}
+        while isinstance(codes, (dict, list)) and codes:
+            codes = next(iter(codes.values())) if isinstance(codes, dict) else codes[0]
+        detail = getattr(exc, "detail", exc)
+        message = _first_message(detail) if isinstance(detail, (dict, list)) else str(detail)
+        error = {"code": codes if isinstance(codes, str) else "error", "message": message}
     response.data = {"error": error}
     return response

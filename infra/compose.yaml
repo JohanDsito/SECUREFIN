@@ -139,7 +139,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # Semana 8 — Pentesting: OWASP Juice Shop, aplicación VULNERABLE A PROPÓSITO, como blanco de
+  # comparación (la misma inyección SQL que SecureFin rechaza, aquí funciona). Solo con el perfil
+  # `pentest`, solo en 127.0.0.1 y en su propia red: no comparte red con SecureFin.
+  #   docker compose -f infra/compose.yaml --profile pentest up -d juiceshop
+  juiceshop:
+    image: bkimminich/juice-shop:v17.1.1
+    profiles: ["pentest"]
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks: [pentest_net]
+    restart: "no"
+
 networks:
+  pentest_net:
+    driver: bridge
   edge_net:
     driver: bridge
   app_net:
