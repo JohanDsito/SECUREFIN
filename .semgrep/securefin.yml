@@ -1,0 +1,59 @@
+rules:
+  - id: securefin-no-csrf-exempt
+    languages: [python]
+    severity: ERROR
+    message: "Prohibido csrf_exempt: todas las rutas que cambian estado exigen CSRF (R3)."
+    pattern-either:
+      - pattern: csrf_exempt
+      - pattern: django.views.decorators.csrf.csrf_exempt
+
+  - id: securefin-no-cors-headers
+    languages: [python]
+    severity: ERROR
+    message: "Prohibido instalar CORS: el SPA vive en el mismo origen (R3)."
+    pattern-either:
+      - pattern: import corsheaders
+      - pattern: from corsheaders import $X
+      - pattern: '"corsheaders"'
+
+  - id: securefin-session-key-confined
+    languages: [python]
+    severity: ERROR
+    message: "El identificador de sesión en claro solo puede tocarse dentro del motor de sesión (R2)."
+    paths:
+      exclude:
+        - "backend/apps/iam/sessions/*"
+        - "backend/tests/*"
+    pattern: $SESSION.session_key
+
+  - id: securefin-views-use-services
+    languages: [python]
+    severity: WARNING
+    message: "Las vistas de iam no deben acceder al ORM directamente; usa un servicio (R1)."
+    paths:
+      include:
+        - "backend/apps/iam/api/views/*"
+    pattern: $MODEL.objects.$METHOD(...)
+
+  - id: securefin-no-web-storage
+    languages: [javascript]
+    severity: ERROR
+    message: "Prohibido localStorage/sessionStorage: nada sensible en el almacenamiento del navegador (R2, R7)."
+    paths:
+      include:
+        - "frontend/src/*"
+    pattern-either:
+      - pattern: localStorage
+      - pattern: sessionStorage
+
+  - id: securefin-e2e-no-leaks
+    languages: [javascript]
+    severity: ERROR
+    message: "Las pruebas E2E no imprimen ni capturan nada que pueda contener tokens (U1)."
+    paths:
+      include:
+        - "frontend/tests/e2e/*"
+    pattern-either:
+      - pattern: console.log(...)
+      - pattern: console.info(...)
+      - pattern: $PAGE.screenshot(...)

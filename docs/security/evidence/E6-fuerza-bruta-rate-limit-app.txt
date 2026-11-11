@@ -1,0 +1,58 @@
+# E6 — Fuerza bruta y rate limiting en la aplicación (Semana 10; FR-037) — 2026-11-10T07:06Z
+Segunda capa, detrás de Nginx: throttles de Django REST Framework por IP y por ámbito (apps/iam/api/throttles.py).
+Umbrales (research R12): login 20/min, mfa 10/min, register 5/h, activation 10/h, mfa_reset_request 3/día.
+Los intentos van a ~3 por segundo: por debajo del limit_req de Nginx (10 r/s), así que el freno es Django.
+
+## Ataque 1: diccionario contra POST /auth/login (25 contraseñas, el mismo usuario)
+intento  1 → 401
+intento  2 → 401
+intento  3 → 401
+intento  4 → 401
+intento  5 → 401
+intento  6 → 401
+intento  7 → 401
+intento  8 → 401
+intento  9 → 401
+intento 10 → 401
+intento 11 → 401
+intento 12 → 401
+intento 13 → 401
+intento 14 → 401
+intento 15 → 401
+intento 16 → 401
+intento 17 → 401
+intento 18 → 401
+intento 19 → 401
+intento 20 → 401
+intento 21 → 429  (Retry-After: 48s)
+intento 22 → 429  (Retry-After: 48s)
+intento 23 → 429  (Retry-After: 48s)
+intento 24 → 429  (Retry-After: 47s)
+intento 25 → 429  (Retry-After: 47s)
+Respuesta del intento 25: {"error":{"code":"throttled","message":"Demasiadas solicitudes. Inténtalo más tarde."}}
+
+## Ataque 2: fuerza bruta de códigos TOTP contra POST /auth/login/mfa (12 códigos)
+código  1 → 401
+código  2 → 401
+código  3 → 401
+código  4 → 401
+código  5 → 401
+código  6 → 401
+código  7 → 401
+código  8 → 401
+código  9 → 401
+código 10 → 401
+código 11 → 429
+código 12 → 429
+
+## Auditoría: eventos throttle_ip_limited registrados durante la prueba: 7
+login_failed | failure |  | 24
+throttle_ip_limited | denied | login | 5
+throttle_ip_limited | denied | mfa | 2
+
+## Lectura
+- Los 20 primeros intentos de login reciben el 401 genérico (no revela si la cuenta existe); desde el 21.º, 429
+  con Retry-After: el atacante debe esperar. En el segundo factor el límite es 10/min: con códigos de 6 dígitos
+  (10^6) y 10 intentos por minuto, recorrer el espacio desde una IP llevaría unos 69 días.
+- Cada bloqueo deja un evento de auditoría throttle_ip_limited con el ámbito y la IP de origen (AAA: Auditoría).
+- Pendiente (US5): retrasos progresivos POR CUENTA (T098–T100), que frenan también ataques desde muchas IPs.

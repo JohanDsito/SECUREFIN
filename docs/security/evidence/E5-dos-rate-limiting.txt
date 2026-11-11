@@ -1,0 +1,59 @@
+# E5 — DoS / inundación HTTP en capa 7 y su mitigación (Semanas 9 y 10) — 2026-11-10T07:05Z
+Herramienta: Apache Benchmark (ab) de la imagen oficial httpd:2.4-alpine, lanzado desde la red edge_net
+(la misma red de Nginx, como un atacante en Internet). El usuario legítimo navega a la vez desde Windows.
+Defensas: limit_req por IP (auth 10 r/s ráfaga 20; api 30 r/s ráfaga 60; web 50 r/s ráfaga 100),
+limit_conn 20 conexiones por IP, respuesta 429 y timeouts cortos (slowloris). Ver infra/nginx/nginx.conf.
+
+## Ataque 1: inundación del endpoint de autenticación (2000 peticiones, 50 concurrentes)
+$ ab -r -n 2000 -c 50 -H "Host: securefin.local" https://nginx/api/v1/auth/csrf
+  usuario leg�timo durante el ataque: 200 en 0.012961s
+  usuario leg�timo durante el ataque: 200 en 0.012348s
+  usuario leg�timo durante el ataque: 200 en 0.011030s
+Server Software:        nginx
+Concurrency Level:      50
+Time taken for tests:   1.744 seconds
+Complete requests:      2000
+Failed requests:        1962
+Non-2xx responses:      1962
+Requests per second:    1146.85 [#/sec] (mean)
+  usuario leg�timo durante el ataque: 200 en 0.010393s
+Códigos registrados por Nginx:
+      4  200
+     38  204
+   1962  429
+
+## Ataque 2: inundación del sitio web (3000 peticiones, 100 concurrentes; supera limit_conn 20)
+$ ab -r -n 3000 -c 100 https://nginx/
+  usuario leg�timo durante el ataque: 200 en 0.011538s
+  usuario leg�timo durante el ataque: 200 en 0.012218s
+  usuario leg�timo durante el ataque: 200 en 0.013277s
+  usuario leg�timo durante el ataque: 200 en 0.011909s
+Server Software:        nginx
+Concurrency Level:      100
+Time taken for tests:   2.779 seconds
+Complete requests:      3000
+Failed requests:        2763
+Non-2xx responses:      2763
+Requests per second:    1079.53 [#/sec] (mean)
+Códigos registrados por Nginx:
+    242  200
+   2763  429
+
+## Estado del servicio tras los ataques
+→ GET / : 200 en 0.010977s
+securefin-backend-1 Up 9 minutes (healthy)
+securefin-db-1 Up 10 minutes (healthy)
+securefin-mailer-1 Up 9 minutes (healthy)
+securefin-mailpit-1 Up 9 minutes (healthy)
+securefin-nginx-1 Up 3 minutes (healthy)
+
+## Lectura
+- 429 Too Many Requests = el limitador actuando: Nginx descarta el exceso antes de que llegue a Django o
+  a PostgreSQL. En el ataque 1 solo ~50 peticiones alcanzan el backend; el resto se corta en el proxy.
+- 'Complete requests' = todas recibieron respuesta: el servidor no se cae y el usuario legítimo (otra IP)
+  sigue entrando en milisegundos durante el ataque. Se preserva la Disponibilidad de la tríada CIA.
+- Límite: un DDoS distribuido (muchas IPs) supera los límites por IP; en producción se añadiría CDN/WAF o
+  protección del proveedor. La limitación por cuenta con retrasos progresivos (US5, T098–T100) sigue pendiente.
+- Nota de laboratorio: lanzar ab desde un contenedor contra host.docker.internal pasa por el reenvío de puertos
+  de Docker Desktop, que se satura con ~100 handshakes TLS simultáneos (ab acaba por timeout). No es Nginx:
+  desde edge_net las 3000 peticiones se completan en ~3 s.

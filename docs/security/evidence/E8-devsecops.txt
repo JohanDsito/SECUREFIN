@@ -1,0 +1,56 @@
+# E8 — DevSecOps: SAST, SCA y escaneo de contenedores (Semana 7) — 2026-11-10T07:24Z
+Mismas herramientas y umbrales que .github/workflows/ci.yml (GitHub Actions en cada push / pull request):
+Semgrep y Bandit (SAST), pip-audit y npm audit (SCA), Trivy (secretos, configuración e imágenes).
+
+## 1. SAST — Semgrep (reglas p/django, p/python, p/react, p/secrets + reglas propias .semgrep/)
+ • Findings: 0 (0 blocking)
+Ran 203 rules on 183 files: 0 findings.
+código de salida: 0
+
+## 2. SAST — Bandit (severidad media y alta)
+	No issues identified.
+	Total lines of code: 4214
+	Total issues (by severity):
+		Medium: 0
+		High: 0
+	Total issues (by confidence):
+		Medium: 1
+		High: 1
+código de salida: 0
+
+## 3. SCA — dependencias con CVE conocidas
+$ pip-audit -r backend/requirements.txt --require-hashes --strict
+No known vulnerabilities found
+código de salida: 0
+$ npm audit --omit=dev --audit-level=high
+found 0 vulnerabilities
+código de salida: 0
+
+## 4. Trivy — imágenes de contenedor: ANTES de corregir (imágenes base fijadas el 2026-11-09)
+securefin-nginx:lab   (nginx 1.28.3, alpine 3.23.3): 73 HIGH/CRITICAL (3 CRITICAL), todas con versión corregida;
+                       5 de ellas en el propio binario de nginx (HTTP/2, rewrite, slice), sin imagen oficial 1.28 parcheada.
+securefin-backend:lab (python 3.13-slim, debian 13.7): 54 HIGH — 2 de Debian con parche, 5 en las dependencias
+                       embebidas de pip (urllib3, msgpack, setuptools) y 47 de Debian sin parche publicado.
+Trivy fs: DS-0002 (HIGH) — el Dockerfile de nginx no declaraba USER: el contenedor corría como root.
+
+## 5. Correcciones aplicadas
+- infra/nginx/Dockerfile: imagen base nginx:1.30-alpine (rama estable actual, digest fijado) + apk upgrade.
+- infra/nginx/Dockerfile + nginx.conf: USER nginx (sin root); pid y temporales en /tmp.
+- backend/Dockerfile: apt-get upgrade (parches de Debian) y se elimina pip de la imagen final (solo se usa al construir).
+
+## 6. Trivy — DESPUÉS de corregir
+$ trivy image --severity HIGH,CRITICAL --exit-code 1 securefin-nginx:lab
+  Total: 0 (sin vulnerabilidades HIGH/CRITICAL) — código de salida: 0
+$ trivy image --severity HIGH,CRITICAL --exit-code 1 securefin-backend:lab
+  Total: 47 (HIGH: 47, CRITICAL: 0) — código de salida: 1
+$ trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 securefin-backend:lab
+  código de salida: 0 (las 47 restantes no tienen parche publicado por Debian)
+$ trivy fs --scanners misconfig,secret --severity HIGH,CRITICAL --exit-code 1 .   (sin secrets/, .venv/, node_modules/)
+  código de salida: 0 ; Dockerfiles: 2 de 2 sin hallazgos
+$ docker exec securefin-nginx-1 id  →  uid=101(nginx) gid=101(nginx) groups=101(nginx)
+
+## 7. Riesgo residual y decisión pendiente
+- 47 CVE HIGH de Debian 13 en la imagen del backend sin parche publicado (estado 'affected'/'fix_deferred'):
+  no se corrigen actualizando. Opciones: aceptar y vigilar (Trivy con --ignore-unfixed en el CI) o cambiar a una
+  base mínima (distroless/alpine). La política del CI hoy NO ignora las no corregibles: el job seguirá en rojo.
+- Nota: el escaneo fs del CI se ejecuta sin la carpeta secrets/ (no existe en el checkout; está en .gitignore).

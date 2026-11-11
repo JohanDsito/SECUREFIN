@@ -1,0 +1,12 @@
+# Finales de línea LF para todo lo que se ejecuta dentro de contenedores Linux. Sin esto, Git en
+# Windows (core.autocrlf=true) convierte los .sh a CRLF y PostgreSQL no puede ejecutar
+# infra/postgres/init/01-roles.sh ("cannot execute: required file not found").
+* text=auto
+*.sh         text eol=lf
+*.conf       text eol=lf
+*.yaml       text eol=lf
+*.yml        text eol=lf
+Dockerfile   text eol=lf
+*.py         text eol=lf
+*.txt        text eol=lf
+*.pem        binary

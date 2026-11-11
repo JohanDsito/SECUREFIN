@@ -1,28 +1,44 @@
-@'
+# --- Secretos (nunca al repositorio; Principio III) ---
+secrets/
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+htpasswd
 
+# --- Python ---
 .venv/
 venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
+coverage.xml
 htmlcov/
 
+# --- Node / frontend ---
 node_modules/
+frontend/dist/
 dist/
 build/
+# Artefactos de Playwright: pueden contener URLs con tokens (U1); nunca se versionan
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/playwright/.cache/
 
+# --- Varios ---
 *.log
+*.tmp
+*.swp
 .DS_Store
 Thumbs.db
-
-*.pem
-*.key
-*.p12
-*.pfx
-'@ | Set-Content .gitignore -Encoding utf8
+.vscode/
+.idea/

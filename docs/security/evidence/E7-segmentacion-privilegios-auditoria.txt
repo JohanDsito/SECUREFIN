@@ -1,0 +1,43 @@
+# E7 — Segmentación de red, mínimo privilegio y auditoría (Semanas 3, 4 y 6; Zero Trust) — 2026-11-10T07:07Z
+
+## 1. Zonas de red (equivalente a VLANs + DMZ)
+securefin_app_net    internal=true  contenedores: securefin-backend-1 securefin-nginx-1
+securefin_data_net   internal=true  contenedores: securefin-mailer-1 securefin-backend-1 securefin-db-1
+securefin_edge_net   internal=false contenedores: securefin-nginx-1
+securefin_mail_net   internal=true  contenedores: securefin-mailer-1 securefin-mailpit-1 securefin-nginx-1
+Solo nginx publica puertos (80/443 y 8025 en 127.0.0.1). internal=true: sin salida a Internet ni entrada desde fuera.
+
+## 2. Pruebas de alcance entre zonas (denegar por defecto)
+edge_net (DMZ, expuesta)        → db:5432       : BLOQUEADO (sin ruta o nombre no resoluble)
+edge_net (DMZ, expuesta)        → backend:8000  : BLOQUEADO (sin ruta o nombre no resoluble)
+app_net  (proxy ↔ aplicación)   → backend:8000  : ALCANZABLE
+app_net  (proxy ↔ aplicación)   → db:5432       : BLOQUEADO (sin ruta o nombre no resoluble)
+data_net (aplicación ↔ datos)   → db:5432       : ALCANZABLE
+backend  → Internet (1.1.1.1:443)              : BLOQUEADO (red interna sin salida)
+
+## 3. Mínimo privilegio en PostgreSQL (consulta de privilegios efectivos; solo lectura)
+La aplicación se conecta como securefin_app; las migraciones, como securefin_owner (R14).
+securefin_app sobre audit_securityevent → SELECT=true INSERT=true UPDATE=false DELETE=false TRUNCATE=false
+securefin_app sobre iam_user → SELECT=true UPDATE=true TRUNCATE=false
+CREATE en el esquema securefin: false
+Propietario de las tablas (solo él puede DROP/ALTER): securefin_owner
+Triggers de protección en audit_securityevent: audit_securityevent_no_update_delete, audit_securityevent_no_truncate
+(La prueba con 'permission denied' real está en backend/tests/security/test_db_privileges.py, contra la base efímera de pruebas.)
+
+## 4. Cómo se guardan los secretos (sin mostrar datos personales)
+-- Hashes de contraseña (formato de Django; salt y hash ocultos):
+   formato: argon2$argon2id$v=19$m=65536,t=3,p=1$<salt>$<hash>  → 5 usuarios
+-- Contraseñas que no son Argon2id ni inutilizables (es decir, en claro u otro algoritmo): 0
+-- Secretos TOTP cifrados con AES-256-GCM: 1 dispositivos; nonce de 12 bytes; versión de clave v1
+-- Sesiones: solo verificador HMAC: 9 sesiones; versión del verificador: v1
+
+## 5. Auditoría (AAA): eventos por tipo y resultado (sin actores ni IPs)
+   login_failed | failure | 26
+   login_succeeded | success | 10
+   throttle_ip_limited | denied | 7
+   account_registered | success | 5
+   sessions_revoked | success | 3
+   authz_denied | denied | 2
+   mfa_enabled | success | 2
+   recovery_code_used | success | 2
+   totp_rejected | failure | 1

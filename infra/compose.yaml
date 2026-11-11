@@ -1,0 +1,180 @@
+# SecureFin Gateway — entorno de laboratorio (T011; R10, R14; plan.md → Despliegue).
+# Uso desde la raíz del repositorio:
+#   docker compose -f infra/compose.yaml up -d --build --wait
+#   docker compose -f infra/compose.yaml --profile oneoff run --rm migrate
+# Imágenes externas fijadas por etiqueta y digest (R17).
+name: securefin
+
+x-django-runtime: &django-runtime
+  build:
+    context: ../backend
+  image: securefin-backend:lab
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings.lab
+    SECUREFIN_PROCESS_ROLE: runtime
+    DB_HOST: db
+    DB_NAME: securefin
+    DB_USER: securefin_app
+    DB_PASSWORD_FILE: /run/secrets/db_app_password
+    EMAIL_HOST: mailpit
+    EMAIL_PORT: "1025"
+  secrets:
+    - django_secret_key
+    - session_hmac_key_v1
+    - token_hmac_key_v1
+    - throttle_hmac_key_v1
+    - totp_key_v1
+    - db_app_password
+  depends_on:
+    db:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  nginx:
+    build:
+      context: ..
+      dockerfile: infra/nginx/Dockerfile
+    image: securefin-nginx:lab
+    ports:
+      - "443:443"
+      - "80:80"
+      - "127.0.0.1:8025:8025"   # proxy TLS de Mailpit, solo en loopback
+    secrets:
+      - tls_cert
+      - tls_key
+      - mailpit_htpasswd
+    volumes:
+      - ../secrets/pki-public:/usr/share/nginx/html/.well-known/pki:ro
+    networks: [edge_net, app_net, mail_net]
+    depends_on:
+      backend:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --no-check-certificate -O /dev/null https://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    <<: *django-runtime
+    networks: [app_net, data_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mailer:
+    <<: *django-runtime
+    command: ["python", "manage.py", "iam_deliver_outbox"]
+    networks: [data_net, mail_net]
+    healthcheck:
+      # La imagen slim no trae procps: se comprueba el proceso principal leyendo /proc
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0 if b'iam_deliver_outbox' in open('/proc/1/cmdline','rb').read() else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build:
+      context: ../backend
+    image: securefin-backend:lab
+    profiles: ["oneoff"]
+    command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py createcachetable"]
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.lab
+      SECUREFIN_PROCESS_ROLE: migrate
+      DB_HOST: db
+      DB_NAME: securefin
+      DB_USER: securefin_owner            # único servicio con la credencial del propietario (U1)
+      DB_PASSWORD_FILE: /run/secrets/db_owner_password
+    secrets:
+      - django_secret_key
+      - session_hmac_key_v1
+      - token_hmac_key_v1
+      - throttle_hmac_key_v1
+      - totp_key_v1
+      - db_owner_password
+    networks: [data_net]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f
+    environment:
+      POSTGRES_DB: securefin
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_superuser_password
+    secrets:
+      - db_superuser_password
+      - db_owner_password
+      - db_app_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [data_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d securefin"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.33.1@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
+    environment:
+      MP_MAX_MESSAGES: "200"
+      MP_MAX_AGE: "24h"
+      MP_UI_AUTH_FILE: /run/secrets/mailpit_htpasswd
+      MP_BLOCK_REMOTE_CSS_AND_FONTS: "true"
+      # Sin MP_SMTP_RELAY_*: no hay relay ni envío externo (T-32)
+    secrets:
+      - mailpit_htpasswd
+    networks: [mail_net]          # sin puertos publicados
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Semana 8 — Pentesting: OWASP Juice Shop, aplicación VULNERABLE A PROPÓSITO, como blanco de
+  # comparación (la misma inyección SQL que SecureFin rechaza, aquí funciona). Solo con el perfil
+  # `pentest`, solo en 127.0.0.1 y en su propia red: no comparte red con SecureFin.
+  #   docker compose -f infra/compose.yaml --profile pentest up -d juiceshop
+  juiceshop:
+    image: bkimminich/juice-shop:v17.1.1
+    profiles: ["pentest"]
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks: [pentest_net]
+    restart: "no"
+
+networks:
+  pentest_net:
+    driver: bridge
+  edge_net:
+    driver: bridge
+  app_net:
+    internal: true
+  data_net:
+    internal: true
+  mail_net:
+    internal: true
+
+volumes:
+  pgdata:
+
+secrets:
+  django_secret_key:     { file: ../secrets/django_secret_key }
+  session_hmac_key_v1:   { file: ../secrets/session_hmac_key_v1 }
+  token_hmac_key_v1:     { file: ../secrets/token_hmac_key_v1 }
+  throttle_hmac_key_v1:  { file: ../secrets/throttle_hmac_key_v1 }
+  totp_key_v1:           { file: ../secrets/totp_key_v1 }
+  db_superuser_password: { file: ../secrets/db_superuser_password }
+  db_owner_password:     { file: ../secrets/db_owner_password }
+  db_app_password:       { file: ../secrets/db_app_password }
+  tls_cert:              { file: ../secrets/tls_cert.pem }
+  tls_key:               { file: ../secrets/tls_key.pem }
+  mailpit_htpasswd:      { file: ../secrets/mailpit_htpasswd }

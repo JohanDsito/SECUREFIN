@@ -1,0 +1,49 @@
+# E2 — TLS y criptografía (Semanas 1 y 2) — 2026-11-10T06:58Z
+
+## Versiones de TLS aceptadas por el servidor (ssl_protocols TLSv1.2 TLSv1.3)
+$ openssl s_client -tls1_3
+New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384
+    Protocol  : TLSv1.3
+    Cipher    : TLS_AES_256_GCM_SHA384
+$ openssl s_client -tls1_2
+New, TLSv1.2, Cipher is ECDHE-RSA-AES256-GCM-SHA384
+    Protocol  : TLSv1.2
+    Cipher    : ECDHE-RSA-AES256-GCM-SHA384
+$ openssl s_client -tls1_1 -cipher DEFAULT@SECLEVEL=0   (debe rechazarse)
+E87A0000:error:0A00042E:SSL routines:ssl3_read_bytes:tlsv1 alert protocol version:../openssl-3.2.1/ssl/record/rec_layer_s3.c:865:SSL alert number 70
+New, (NONE), Cipher is (NONE)
+    Protocol  : TLSv1.1
+
+## Certificado del servidor (público): algoritmo y tamaño de clave
+subject=CN=securefin.local
+issuer=CN=SecureFin Lab CA
+notBefore=Nov  9 18:21:31 2026 GMT
+notAfter=Nov  8 18:26:31 2027 GMT
+X509v3 Subject Alternative Name:
+    DNS:securefin.local, IP Address:127.0.0.1
+                Public-Key: (3072 bit)
+            Public Key Algorithm: rsaEncryption
+        Signature Algorithm: sha256WithRSAEncryption
+    Signature Algorithm: sha256WithRSAEncryption
+
+## Demostración con OpenSSL (claves temporales fuera del repositorio)
+$ printf "SecureFin" | openssl dgst -sha256
+SHA2-256(stdin)= 7cfeea2db2bcdab7caaf299ef4b5a4cbd1a20a20ae0ed071a5612264911316dd
+$ printf "SecureFin" | openssl dgst -sha256   (mismo texto → mismo hash: por eso las contraseñas llevan salt)
+SHA2-256(stdin)= 7cfeea2db2bcdab7caaf299ef4b5a4cbd1a20a20ae0ed071a5612264911316dd
+$ openssl rand -hex 16   (salt aleatoria)
+<16 bytes aleatorios, distinta en cada ejecución>
+$ openssl enc -aes-256-cbc -pbkdf2 -iter 600000 (cifrado simétrico AES-256) → descifrado
+  tamaño cifrado: 48 bytes; cabecera: Salted__
+  descifrado: saldo: 1.000.000 COP
+$ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 (asimétrico) → cifrar con pública, descifrar con privada
+  cifrado RSA-OAEP: 384 bytes; descifrado: saldo: 1.000.000 COP
+$ openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 (ECC) → firma y verificación
+  Verified OK
+
+## Dónde se usa en SecureFin
+- Contraseñas: Argon2id (m=64 MiB, t=3, p=1) con salt aleatoria por usuario (apps/iam/policies/hashers.py).
+- Códigos de recuperación y código del desafío de reinicio de MFA: Argon2id (m=19 MiB, t=2, p=1).
+- Secretos TOTP: AES-256-GCM con nonce de 96 bits y AAD ligada al usuario (apps/iam/crypto/aead.py).
+- Tokens de activación/sesión: solo se guarda HMAC-SHA-256 con clave dedicada (apps/iam/crypto/hmac_verifiers.py).
+- Transporte: TLS 1.2/1.3 con certificado RSA-3072 de la CA del laboratorio (infra/nginx/nginx.conf).

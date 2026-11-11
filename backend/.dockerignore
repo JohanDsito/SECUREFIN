@@ -1,0 +1,12 @@
+.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+requirements-dev.*
+Dockerfile
+.dockerignore
+*.log
+.env*

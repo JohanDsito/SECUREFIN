@@ -1,0 +1,177 @@
+# CI de SecureFin Gateway (T014; R16). Cuatro trabajos separados; ninguno omite pruebas en silencio.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      # Semgrep va en su propio entorno virtual y con hashes (requirements-sast.txt): mezclarlo sin
+      # versión en el mismo `pip install` que un archivo con hashes hace fallar a pip.
+      - name: Herramientas de análisis
+        run: |
+          pip install --require-hashes -r backend/requirements.txt
+          pip install --require-hashes -r backend/requirements-dev.txt
+          python -m venv "$RUNNER_TEMP/sast"
+          "$RUNNER_TEMP/sast/bin/pip" install --require-hashes -r backend/requirements-sast.txt
+          echo "$RUNNER_TEMP/sast/bin" >> "$GITHUB_PATH"
+      - name: SAST — Semgrep
+        run: semgrep scan --error --config p/django --config p/python --config p/react --config p/secrets --config .semgrep/
+      - name: SAST — Bandit
+        run: bandit -r backend/apps backend/config -ll
+      - name: SCA — pip-audit
+        run: pip-audit -r backend/requirements.txt --require-hashes --strict
+      - name: SCA — npm audit
+        working-directory: frontend
+        run: npm ci --ignore-scripts && npm audit --omit=dev --audit-level=high
+      # Fijado por SHA: upstream retiró las etiquetas sin prefijo «v» (p. ej. 0.28.0) y
+      # setup-trivy v0.2.1, del que dependían. v0.36.0 = Trivy v0.70.0.
+      - name: Archivos y secretos — Trivy fs
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scanners: misconfig,secret
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  unit:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install --require-hashes -r requirements.txt && pip install -r requirements-dev.txt
+      # pytest devuelve 5 si no recoge ninguna prueba: el trabajo falla.
+      - run: pytest -m unit
+
+  integration:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: backend } }
+    env:
+      TEST_DB_HOST: 127.0.0.1
+      TEST_DB_PORT: "5432"
+      TEST_DB_USER: postgres
+      TEST_DB_PASSWORD: postgres-ci-ephemeral
+    services:
+      postgres:
+        image: postgres:17@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f
+        env:
+          POSTGRES_PASSWORD: postgres-ci-ephemeral
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - name: Roles efímeros de PostgreSQL (sin secretos reales)
+        run: |
+          APP_PW="$(openssl rand -base64 24)"
+          echo "::add-mask::$APP_PW"
+          echo "DB_APP_PASSWORD=$APP_PW" >> "$GITHUB_ENV"
+          PGPASSWORD=postgres-ci-ephemeral psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE securefin_app LOGIN PASSWORD '$APP_PW';"
+      - run: pip install --require-hashes -r requirements.txt && pip install -r requirements-dev.txt
+      - run: pytest -m "integration or session_conformance or security or contract or acceptance" -m "not stack" --cov=apps --cov-report=term
+
+  stack:
+    runs-on: ubuntu-24.04
+    needs: [static, unit, integration]
+    env:
+      SECUREFIN_STACK_URL: https://securefin.local
+      # Cuenta pendiente que crea iam_bootstrap_admin para la E2E de activación (T135)
+      SECUREFIN_E2E_ACTIVATION_EMAIL: e2e-admin@lab.securefin.local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Secretos efímeros (U4) — nunca reales, nunca versionados
+        run: |
+          set -euo pipefail
+          mkdir -p secrets && chmod 700 secrets
+          for k in django_secret_key session_hmac_key_v1 token_hmac_key_v1 throttle_hmac_key_v1 \
+                   totp_key_v1 db_superuser_password db_owner_password db_app_password; do
+            openssl rand -base64 32 > "secrets/$k"
+          done
+          openssl req -x509 -newkey rsa:3072 -sha256 -days 2 -nodes -keyout secrets/lab_ca.key \
+            -out secrets/lab_ca.pem -subj "/CN=SecureFin CI CA" 2>/dev/null
+          openssl req -newkey rsa:3072 -sha256 -nodes -keyout secrets/tls_key.pem -out secrets/tls.csr \
+            -subj "/CN=securefin.local" 2>/dev/null
+          printf "subjectAltName=DNS:securefin.local,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n" > secrets/san.ext
+          openssl x509 -req -in secrets/tls.csr -CA secrets/lab_ca.pem -CAkey secrets/lab_ca.key \
+            -CAcreateserial -days 2 -sha256 -extfile secrets/san.ext -out secrets/tls_cert.pem 2>/dev/null
+          MP_USER="ci-$(openssl rand -hex 4)"
+          MP_PASS="$(openssl rand -base64 24)"
+          echo "::add-mask::$MP_PASS"
+          printf "%s:%s\n" "$MP_USER" "$(openssl passwd -apr1 "$MP_PASS")" > secrets/mailpit_htpasswd
+          echo "MAILPIT_API_USER=$MP_USER" >> "$GITHUB_ENV"
+          echo "MAILPIT_API_PASSWORD=$MP_PASS" >> "$GITHUB_ENV"
+          echo "NODE_EXTRA_CA_CERTS=$PWD/secrets/lab_ca.pem" >> "$GITHUB_ENV"
+          echo "127.0.0.1 securefin.local" | sudo tee -a /etc/hosts >/dev/null
+      # Orden: base de datos → migraciones → resto. El mailer consulta el outbox al arrancar y
+      # fallaría (y --wait no terminaría) si el esquema aún no existe.
+      - name: Base de datos
+        run: docker compose -f infra/compose.yaml up -d --build --wait db
+      - name: Migraciones (único uso de securefin_owner)
+        run: docker compose -f infra/compose.yaml --profile oneoff run --rm migrate
+      - name: Resto del stack y espera de healthchecks
+        run: docker compose -f infra/compose.yaml up -d --build --wait
+      # Antes: `pip install pytest` dentro del contenedor del backend. No podía funcionar: la imagen
+      # no trae pip (hardening) y el backend está en redes internas sin salida a Internet. Ahora se
+      # comprueban los controles desde fuera, como un atacante: cabeceras, banner, TLS, 301, TRACE,
+      # inyección SQL y rate limiting (429).
+      - name: Prueba de humo de los controles de seguridad del stack
+        run: bash scripts/smoke-stack.sh
+      - name: Cuenta pendiente de activación para la E2E (bootstrap por consola, FR-022)
+        run: |
+          docker compose -f infra/compose.yaml exec -T backend \
+            python manage.py iam_bootstrap_admin --email "$SECUREFIN_E2E_ACTIVATION_EMAIL" --name "Admin E2E"
+      - name: Pruebas E2E (Playwright; sin trazas, vídeos, capturas ni artefactos)
+        working-directory: frontend
+        run: npm ci && npx playwright install --with-deps chromium && npx playwright test
+      # ignore-unfixed: el pipeline falla por toda CVE HIGH/CRITICAL que YA tenga parche (hay que
+      # actualizar). Las que Debian aún no ha corregido (47 en python:3.13-slim / Debian 13) no se
+      # pueden arreglar actualizando: se aceptan como riesgo documentado (docs/security/README.md,
+      # "Riesgos abiertos") y se listan en el paso informativo siguiente para vigilarlas.
+      - name: Trivy — imagen del backend (CVE con parche disponible)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: securefin-backend:lab
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Trivy — imagen de Nginx (CVE con parche disponible)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: securefin-nginx:lab
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Trivy — informe de CVE sin parche (riesgo aceptado, no bloquea)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: securefin-backend:lab
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+      # Limpieza SIEMPRE, también si algo falla. No hay ningún actions/upload-artifact en este
+      # trabajo: test-results/, playwright-report/, trazas y capturas nunca se suben (U1).
+      - name: Limpieza (mensajes de Mailpit, volúmenes, secretos y salidas de prueba)
+        if: always()
+        run: |
+          curl -sf --cacert secrets/lab_ca.pem -u "$MAILPIT_API_USER:$MAILPIT_API_PASSWORD" \
+            -X DELETE https://127.0.0.1:8025/api/v1/messages -o /dev/null || true
+          docker compose -f infra/compose.yaml down -v --remove-orphans || true
+          rm -rf secrets frontend/test-results frontend/playwright-report
