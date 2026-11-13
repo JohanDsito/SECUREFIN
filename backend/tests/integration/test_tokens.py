@@ -67,13 +67,11 @@ def test_ttl_boundaries(make_user, clock, purpose, ok, expired):
         tokens.redeem(late, purpose)
 
 
-# Las pruebas transaccionales vacían la base de datos al terminar. Se excluye la app `audit`: su
-# trigger BEFORE TRUNCATE impide (correctamente) vaciar la tabla de eventos.
-NON_AUDIT_APPS = ["django.contrib.contenttypes", "django.contrib.auth", "rest_framework", "apps.core", "apps.iam"]
-
-
-@pytest.mark.django_db(transaction=True, available_apps=NON_AUDIT_APPS)
-def test_concurrent_redeem_only_one_succeeds(make_user):
+# Transacciones reales entre hilos: `concurrent_db` desactiva durante la limpieza los triggers
+# append-only (auditoría y libro contable de finance), que impiden con razón el TRUNCATE. Antes se
+# usaba `available_apps`, pero Django vacía entonces con TRUNCATE … CASCADE y la cascada desde
+# iam_user llega hasta finance_ledgerentry.
+def test_concurrent_redeem_only_one_succeeds(concurrent_db, make_user):
     token = tokens.issue(make_user(), "password_reset")
     results = []
     barrier = threading.Barrier(2)

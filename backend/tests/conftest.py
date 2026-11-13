@@ -184,6 +184,26 @@ def _restore_audit_trigger(request, django_db_blocker):
         with django_db_blocker.unblock(), connection.cursor() as cursor:
             cursor.execute(_AUDIT_TRUNCATE_TRIGGER.format("ENABLE"))
             cursor.execute(_FINANCE_LEDGER_TRUNCATE_TRIGGER.format("ENABLE"))
+        with django_db_blocker.unblock():
+            _ensure_finance_seed_limits()
+
+
+def _ensure_finance_seed_limits():
+    """Vuelve a sembrar la política financiera por defecto si una prueba transaccional la borró.
+
+    La crea la migración de datos `finance.0003_seed_limits`, pero el vaciado (TRUNCATE) tras cada
+    prueba transaccional borra también los datos de las migraciones. Sin esto, las pruebas que
+    dependen de los límites fallarían o no según el orden de ejecución. Se reutiliza la función de
+    la propia migración para no duplicar los valores.
+    """
+    import importlib
+
+    from django.apps import apps as django_apps
+
+    from apps.finance.models import FinancialLimit
+
+    if not FinancialLimit.objects.filter(scope_type="role", scope_id="client").exists():
+        importlib.import_module("apps.finance.migrations.0003_seed_limits").seed_limits(django_apps, None)
 
 
 @pytest.fixture

@@ -64,7 +64,7 @@ test.describe("admin/Users", () => {
       },
     });
     await page.goto("/admin/users");
-    await expect(page.getByRole("status")).toContainText("Cargando");
+    await expect(page.getByRole("status").filter({ hasText: "Cargando" })).toBeVisible();
     const self = page.getByRole("row", { name: /admin@lab/ });
     await expect(self).toContainText("Tu cuenta");
     await expect(self.getByRole("button")).toHaveCount(0);
@@ -117,7 +117,7 @@ test.describe("admin/Users", () => {
     await row.getByRole("combobox").selectOption("auditor");
     await row.getByRole("button", { name: "Cambiar rol" }).click();
     await row.getByRole("button", { name: "Confirmar" }).click();
-    await expect(page.getByRole("status")).toContainText("Rol cambiado");
+    await expect(page.getByRole("status").filter({ hasText: "Rol cambiado" })).toBeVisible();
     expect(calls.find((c) => c.key === "PATCH /admin/users/u-ana/role").body).toEqual({ role: "auditor" });
   });
 
@@ -175,7 +175,7 @@ test.describe("admin/MfaResets", () => {
     await expect(page.getByRole("group")).toContainText("Canal oficial del curso");
     expect(calls.filter((c) => c.key.endsWith("/open"))).toHaveLength(0);
     await page.getByRole("button", { name: "Sí, abrir caso" }).click();
-    await expect(page.getByRole("status")).toContainText("Caso abierto");
+    await expect(page.getByRole("status").filter({ hasText: "Caso abierto" })).toBeVisible();
     expect(calls.find((c) => c.key.endsWith("/open")).body).toEqual({ request_channel: "course_channel" });
   });
 
@@ -216,7 +216,7 @@ test.describe("admin/MfaResets", () => {
     expect(calls.filter((c) => c.key.endsWith("/cancel"))).toHaveLength(0);
     await page.getByRole("button", { name: "Cancelar caso" }).click();
     await page.getByRole("button", { name: "Sí, cancelar el caso" }).click();
-    await expect(page.getByRole("status")).toContainText("Caso cancelado");
+    await expect(page.getByRole("status").filter({ hasText: "Caso cancelado" })).toBeVisible();
   });
 });
 
@@ -230,7 +230,7 @@ test.describe("MfaStep: Perdí mi dispositivo y mis códigos", () => {
     await expect(page.getByRole("group")).toContainText("Tu contraseña no cambia");
     expect(calls.filter((c) => c.key.includes("mfa-reset-request"))).toHaveLength(0);
     await page.getByRole("button", { name: "Sí, solicitar reinicio" }).click();
-    await expect(page.getByRole("status")).toContainText("Un Administrador contactará contigo");
+    await expect(page.getByRole("status").filter({ hasText: "Un Administrador contactará contigo" })).toBeVisible();
     await expectNoBrowserStorage(page);
   });
 
