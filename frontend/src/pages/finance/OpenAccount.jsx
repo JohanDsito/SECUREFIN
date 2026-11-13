@@ -22,7 +22,9 @@ export default function OpenAccount() {
       setError(
         requestError instanceof ApiError && requestError.status === 401
           ? "Tu sesión ya no está activa. Inicia sesión nuevamente."
-          : "No se pudo abrir la cuenta. Revisa los datos e inténtalo otra vez.",
+          : requestError instanceof ApiError && requestError.status === 403
+            ? "Tu rol no puede abrir cuentas: solo los Clientes operan dinero (separación de funciones)."
+            : "No se pudo abrir la cuenta. Revisa los datos e inténtalo otra vez.",
       );
     } finally {
       setBusy(false);

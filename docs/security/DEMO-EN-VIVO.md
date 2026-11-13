@@ -14,9 +14,8 @@ Todos los comandos se ejecutan en **Git Bash** desde la raíz del repositorio. E
 1. **Levantar el stack** (base de datos → migraciones → resto):
 
    ```bash
-   docker compose -f infra/compose.yaml up -d --wait db
-   docker compose -f infra/compose.yaml --profile oneoff run --rm migrate
-   docker compose -f infra/compose.yaml up -d --build --wait
+   bash scripts/setup.sh                       # secretos (1.ª vez) + db → migraciones → resto
+   bash scripts/setup.sh pentest               # OWASP Juice Shop para la Semana 8
    bash docs/security/demo/demo.sh estado      # los 5 contenedores en "healthy"
    ```
 
@@ -54,6 +53,12 @@ Todos los comandos se ejecutan en **Git Bash** desde la raíz del repositorio. E
 ---
 
 ## Orden recomendado (≈ 25 minutos)
+
+### 0. Apertura: Centro de seguridad · 2 min
+
+Abre **https://securefin.local/seguridad** y pulsa los botones en orden: *Comprobar* (cabeceras y
+banner), *Atacar login* (`' OR 1=1 --` → 401) y *Lanzar 80 peticiones* (la barra se llena de 429).
+Debajo está el mapa de las 10 semanas con el comando de cada una.
 
 ### 1. Arquitectura y segmentación — Semanas 3, 6 (Zero Trust, VLAN, DMZ) · 2 min
 
@@ -149,6 +154,8 @@ También se puede escribir `' OR 1=1 --` como correo en el formulario de login d
 
 - **Se verá**: todos los payloads → el mismo **401 genérico**; `"role":"admin"` → **400 campo no
   permitido**; la tabla de usuarios sigue intacta.
+- **Comparar con un blanco vulnerable**: `bash docs/security/demo/demo.sh juiceshop` → en Juice
+  Shop el mismo payload devuelve **200 y un token de administrador**; en SecureFin, **401**.
 - **Explicar**: ORM con consultas **parametrizadas**, listas permitidas de campos y un usuario de base
   de datos **sin permisos de DDL** (`bash docs/security/demo/demo.sh privilegios`).
 

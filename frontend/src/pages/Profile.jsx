@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../api/client.js";
+import { ROLE_LABEL } from "../lib/labels.jsx";
 
 // Perfil propio (T065; US2, FR-018). Solo se puede editar el nombre: el servidor rechaza cualquier
 // otro campo, de modo que el formulario no es la frontera de confianza (FR-049).
@@ -42,17 +43,18 @@ export default function Profile() {
   const { profile, security } = state;
   return (
     <section>
+      <p className="finance-eyebrow">Identidad · IAM</p>
       <h1>Mi perfil</h1>
       <dl>
         <dt>Correo</dt>
         <dd>{profile.email}</dd>
         <dt>Rol</dt>
-        <dd>{profile.role}</dd>
+        <dd>{ROLE_LABEL[profile.role] ?? profile.role}</dd>
         <dt>Cuenta creada</dt>
         <dd>{new Date(profile.created_at).toLocaleString()}</dd>
         <dt>Segundo factor (MFA)</dt>
         <dd>
-          {security.mfa_enabled ? "Activo" : "No configurado"}
+          <span className={`pill ${security.mfa_enabled ? "pill--ok" : "pill--warn"}`}>{security.mfa_enabled ? "Activo" : "No configurado"}</span>
           {security.mfa_required && " · obligatorio para tu rol"}{" "}
           <Link to={security.mfa_enabled ? "/mfa/reconfigure" : "/mfa/setup"}>
             {security.mfa_enabled ? "Reconfigurar" : "Configurar"}

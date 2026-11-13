@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { api, ApiError } from "../api/client.js";
 
 // Registro de Clientes (T056; FR-001 a FR-005; U1). El formulario es un <form> con botón submit,
@@ -29,6 +29,7 @@ export default function Register() {
   }
 
   return (
+    <div className="auth-layout">
     <form id="register-form" name="register" method="post" onSubmit={onSubmit} noValidate>
       <h1>Crear cuenta de Cliente</h1>
       <label htmlFor="register-email">Correo (ficticio)</label>
@@ -50,7 +51,24 @@ export default function Register() {
           )}
         </div>
       )}
-      <button type="submit" disabled={busy}>Registrarse</button>
+      <button type="submit" disabled={busy}>{busy ? "Creando…" : "Registrarse"}</button>
+      <p className="auth-switch">¿Ya tienes cuenta? <Link to="/login">Inicia sesión</Link></p>
     </form>
+    <aside className="auth-aside">
+      <p className="finance-eyebrow">Al abrir tu cuenta recibes</p>
+      <div className="bank-card bank-card--light" aria-hidden="true">
+        <span className="bank-card__chip" />
+        <strong>SecureFin</strong>
+        <span className="bank-card__balance">$ 5.000.000 COP</span>
+        <small>Saldo de bienvenida ficticio</small>
+      </div>
+      <ul>
+        <li>Cuenta de ahorros en COP lista para transferir.</li>
+        <li>Puedes abrir cuentas adicionales en COP o USD.</li>
+        <li>Tu contraseña se valida contra una lista de contraseñas filtradas y se guarda con Argon2id.</li>
+        <li>El rol siempre es Cliente: enviar <code>"role":"admin"</code> se rechaza (asignación masiva).</li>
+      </ul>
+    </aside>
+    </div>
   );
 }

@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../../api/client.js";
+import ClientOnly from "../../components/finance/ClientOnly.jsx";
+import { KIND_LABEL, StatusPill, formatAmount, formatDate } from "../../lib/labels.jsx";
 
-function formatAmount(amountMinor, currency) {
-  return new Intl.NumberFormat("es-CO", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(amountMinor / 100);
-}
+const STEPS = [
+  ["Solicitada", () => true],
+  ["Revisión de límites y riesgo", () => true],
+  ["Aprobación", (s) => s !== "pending_approval"],
+  ["Aplicada al saldo", (s) => s === "completed"],
+];
 
 export default function TransferResult() {
   const { transactionId } = useParams();
@@ -17,10 +18,11 @@ export default function TransferResult() {
   useEffect(() => {
     api(`/finance/transfers/${encodeURIComponent(transactionId)}`)
       .then((transaction) => setState({ loading: false, transaction }))
-      .catch(() => setState({ loading: false, transaction: null }));
+      .catch((e) => setState({ loading: false, transaction: null, forbidden: e?.status === 403 }));
   }, [transactionId]);
 
   if (state.loading) return <p role="status">Cargando estado…</p>;
+  if (state.forbidden) return <ClientOnly />;
   if (!state.transaction) {
     return (
       <section className="finance-page">
@@ -31,19 +33,32 @@ export default function TransferResult() {
     );
   }
 
-  const transaction = state.transaction;
+  const t = state.transaction;
   return (
     <section className="finance-page">
-      <Link to="/finance" className="finance-back-link">← Volver al panel</Link>
-      <p className="finance-eyebrow">Referencia de operación</p>
+      <Link to="/finance/activity" className="finance-back-link">← Ver todos los movimientos</Link>
+      <p className="finance-eyebrow">Comprobante de operación simulada</p>
       <h1>Estado de la transferencia</h1>
+      <div className="receipt-head">
+        <strong className="receipt-amount">{formatAmount(t.amount_minor, t.currency)}</strong>
+        <StatusPill status={t.status} />
+      </div>
+      <ol className="timeline">
+        {STEPS.map(([label, done]) => {
+          const isDone = t.status !== "rejected" ? done(t.status) : label !== "Aplicada al saldo";
+          const failed = t.status === "rejected" && label === "Aprobación";
+          return (
+            <li key={label} className={failed ? "is-bad" : isDone ? "is-done" : ""}>
+              {failed ? "Rechazada" : label}
+            </li>
+          );
+        })}
+      </ol>
       <dl className="finance-detail-list">
-        <dt>Estado</dt><dd>{transaction.status}</dd>
-        <dt>Importe</dt><dd>{formatAmount(transaction.amount_minor, transaction.currency)}</dd>
-        <dt>Tipo</dt><dd>{transaction.kind}</dd>
-        <dt>Descripción</dt><dd>{transaction.description || "Sin descripción"}</dd>
-        <dt>Referencia</dt><dd>{transaction.id}</dd>
-        <dt>Creada</dt><dd>{new Date(transaction.created_at).toLocaleString("es-CO")}</dd>
+        <dt>Tipo</dt><dd>{KIND_LABEL[t.kind] ?? t.kind}</dd>
+        <dt>Descripción</dt><dd>{t.description || "Sin descripción"}</dd>
+        <dt>Referencia</dt><dd><code>{t.id}</code></dd>
+        <dt>Creada</dt><dd>{formatDate(t.created_at)}</dd>
       </dl>
     </section>
   );
