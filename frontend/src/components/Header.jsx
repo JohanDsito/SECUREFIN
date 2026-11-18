@@ -45,6 +45,7 @@ export default function Header() {
             {(user.role === "admin" || user.role === "auditor") && (
               <NavLink className="nav-link" to="/admin/finance/approvals">Aprobaciones</NavLink>
             )}
+            {user.role === "auditor" && <NavLink className="nav-link" to="/monitoreo">Monitoreo</NavLink>}
             <Link className="user-chip" to="/profile" title="Mi perfil">
               <span className="user-chip__avatar" aria-hidden="true">{(user.name || "?").slice(0, 1).toUpperCase()}</span>
               <span className="user-chip__copy">

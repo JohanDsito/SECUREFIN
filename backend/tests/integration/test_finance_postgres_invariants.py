@@ -39,11 +39,11 @@ def test_postgres_ledger_role_can_read_insert_but_not_mutate():
             pytest.skip("El rol securefin_app no existe en esta base de prueba.")
         cursor.execute(
             """
-            SELECT has_table_privilege('securefin_app', 'securefin.finance_ledgerentry', 'SELECT'),
-                   has_table_privilege('securefin_app', 'securefin.finance_ledgerentry', 'INSERT'),
-                   has_table_privilege('securefin_app', 'securefin.finance_ledgerentry', 'UPDATE'),
-                   has_table_privilege('securefin_app', 'securefin.finance_ledgerentry', 'DELETE'),
-                   has_table_privilege('securefin_app', 'securefin.finance_ledgerentry', 'TRUNCATE')
+            SELECT has_table_privilege('securefin_app', 'finance_ledgerentry', 'SELECT'),
+                   has_table_privilege('securefin_app', 'finance_ledgerentry', 'INSERT'),
+                   has_table_privilege('securefin_app', 'finance_ledgerentry', 'UPDATE'),
+                   has_table_privilege('securefin_app', 'finance_ledgerentry', 'DELETE'),
+                   has_table_privilege('securefin_app', 'finance_ledgerentry', 'TRUNCATE')
             """
         )
         can_select, can_insert, can_update, can_delete, can_truncate = cursor.fetchone()

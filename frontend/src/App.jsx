@@ -18,6 +18,7 @@ import Transfer from "./pages/finance/Transfer.jsx";
 import TransferResult from "./pages/finance/TransferResult.jsx";
 import Activity from "./pages/finance/Activity.jsx";
 import Approvals from "./pages/finance/admin/Approvals.jsx";
+import Monitor from "./pages/audit/Monitor.jsx";
 
 // Enrutador del SPA (T045). /activate llega con US4; /forgot-password y /reset, con US7, con
 // exactamente esos nombres (contracts/iam-api.md §6).
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="/activate" element={<Activate />} />
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/admin/mfa-resets" element={<AdminMfaResets />} />
+          <Route path="/monitoreo" element={<Monitor />} />
           <Route path="*" element={<p>Página no encontrada.</p>} />
         </Routes>
       </main>

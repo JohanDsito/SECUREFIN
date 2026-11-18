@@ -85,7 +85,8 @@ jobs:
           PGPASSWORD=postgres-ci-ephemeral psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 \
             -c "CREATE ROLE securefin_app LOGIN PASSWORD '$APP_PW';"
       - run: pip install --require-hashes -r requirements.txt && pip install -r requirements-dev.txt
-      - run: pytest -m "integration or session_conformance or security or contract or acceptance" -m "not stack" --cov=apps --cov-report=term
+      # Una sola expresión de marcadores: con dos `-m`, pytest solo aplica el último.
+      - run: pytest -m "(integration or session_conformance or security or contract or acceptance) and not stack" --cov=apps --cov-report=term
 
   stack:
     runs-on: ubuntu-24.04
